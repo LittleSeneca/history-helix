@@ -4,11 +4,11 @@ export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.ts",
   use: {
-    baseURL: "http://localhost:4173",
+    baseURL: "http://localhost:5199",
   },
   webServer: {
-    command: "npx vite --port 4173",
-    url: "http://localhost:4173",
+    command: "node node_modules/vite/bin/vite.js --port 5199 --strictPort",
+    url: "http://localhost:5199",
     reuseExistingServer: true,
     cwd: ".",
   },
