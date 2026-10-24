@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.worktrees/
+pipeline/.cache/
+*.log
+.DS_Store
+.vite/
