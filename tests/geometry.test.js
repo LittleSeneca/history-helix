@@ -7,6 +7,7 @@ import {
   depth,
   project,
   pointOnSurface,
+  R,
 } from "../src/geometry/helix.js";
 import { TURNS } from "../src/config.js";
 
@@ -138,5 +139,71 @@ describe("pointOnSurface(u, radius, phaseOffset)", () => {
     const dy = p0.y - pPi.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     expect(dist).toBeCloseTo(2 * rad, 10);
+  });
+});
+
+// ── Strand path tests (coil.js) ─────────────────────────────
+// Test strandPoints (pure, Node-compatible). strandPath is the
+// browser wrapper that builds a Path2D.
+import { strandPoints } from "../src/geometry/coil.js";
+
+describe("strandPoints(u0, u1, rho, phase)", () => {
+  it("returns an array of {x,y} points", () => {
+    const pts = strandPoints(0.1, 0.3, 5, 0.05, 6);
+    expect(Array.isArray(pts)).toBe(true);
+    expect(pts.length).toBeGreaterThanOrEqual(2);
+    for (const p of pts) {
+      expect(typeof p.x).toBe("number");
+      expect(typeof p.y).toBe("number");
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.y)).toBe(true);
+    }
+  });
+
+  it("returns 1 + samples points", () => {
+    const pts = strandPoints(0.2, 0.7, 0, 0, 12);
+    expect(pts.length).toBe(13); // start + 12 intermediate
+  });
+
+  it("start point matches pointOnSurface at u0", () => {
+    const u0 = 0.15;
+    const u1 = 0.42;
+    const rho = 7;
+    const phase = 0.08;
+    const pts = strandPoints(u0, u1, rho, phase, 12);
+    const expected = pointOnSurface(u0, R + rho, phase);
+    expect(pts[0].x).toBeCloseTo(expected.x, 10);
+    expect(pts[0].y).toBeCloseTo(expected.y, 10);
+  });
+
+  it("end point matches pointOnSurface at u1", () => {
+    const u0 = 0.15;
+    const u1 = 0.42;
+    const rho = 7;
+    const phase = 0.08;
+    const pts = strandPoints(u0, u1, rho, phase, 12);
+    const expected = pointOnSurface(u1, R + rho, phase);
+    const last = pts[pts.length - 1];
+    expect(last.x).toBeCloseTo(expected.x, 10);
+    expect(last.y).toBeCloseTo(expected.y, 10);
+  });
+
+  it("at rho=0, phase=0, strandPoints(u, u, 0, 0) gives pointOnSurface(u, R, 0)", () => {
+    const u = 0.4;
+    const pts = strandPoints(u, u, 0, 0, 6);
+    const expected = pointOnSurface(u, R, 0);
+    // When u0 === u1, all points should be the same
+    for (const p of pts) {
+      expect(p.x).toBeCloseTo(expected.x, 10);
+      expect(p.y).toBeCloseTo(expected.y, 10);
+    }
+  });
+
+  it("pointOnSurface(u, R, 0) equals project(u)", () => {
+    const u = 0.3;
+    const p1 = pointOnSurface(u, R, 0);
+    const p2 = project(u);
+    expect(p1.x).toBeCloseTo(p2.x, 10);
+    expect(p1.y).toBeCloseTo(p2.y, 10);
   });
 });
