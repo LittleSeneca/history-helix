@@ -6,4 +6,7 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
   },
+  test: {
+    exclude: ["**/render.spec.ts", "**/node_modules/**"],
+  },
 });

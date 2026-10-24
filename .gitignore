@@ -5,3 +5,4 @@ pipeline/.cache/
 *.log
 .DS_Store
 .vite/
+test-results/
