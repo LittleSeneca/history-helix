@@ -1,0 +1,9 @@
+entity,code,year,life_expectancy_0
+World,OWID_WRL,1770,28.5
+World,OWID_WRL,1800,28.5
+World,OWID_WRL,1850,29.3
+World,OWID_WRL,1900,32.0
+World,OWID_WRL,1950,46.3944
+World,OWID_WRL,2000,67.6236
+World,OWID_WRL,2023,73.1694
+NonWorld,XYZ,1950,60.0
