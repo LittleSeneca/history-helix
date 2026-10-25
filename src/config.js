@@ -1,8 +1,9 @@
 // Geometry and render constants — single source of truth (DESIGN.md §2)
 
-export const TURNS = 12;
+export const TURNS = 6;
+export const R = 250;        // coil radius (scene px)
 export const LEAN_DEG = 32;
-export const SQUASH = 0.40;
+export const SQUASH = 0.45;
 export const BUDGET = 60_000;
 
 // Era-based color map (DESIGN.md §5 question 4: color-by-era recommended).

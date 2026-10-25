@@ -1,14 +1,16 @@
 // Helix geometry — the single source of truth for all coordinates (DESIGN.md §2.1)
 // No drawing code. No DOM access. Pure math.
 
-import { TURNS, LEAN_DEG, SQUASH } from "../config.js";
+import { TURNS, LEAN_DEG, SQUASH, R } from "../config.js";
+
+// Re-export R for consumers (coil.js, tests)
+export { R };
 
 // ── Time span ──────────────────────────────────────────────
 export const tMin = -10000;
 export const tMax = 2100;
 
 // ── Coil dimensions (scene pixels) ─────────────────────────
-export const R = 150; // coil radius
 const LEN = R * TURNS * 0.45; // total coil height in local space before rotation
 const LEAN_RAD = (LEAN_DEG * Math.PI) / 180;
 const THETA = 2 * Math.PI * TURNS;

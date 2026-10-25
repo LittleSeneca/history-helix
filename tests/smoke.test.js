@@ -1,17 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { TURNS, LEAN_DEG, SQUASH, BUDGET, colors } from "../src/config.js";
+import { TURNS, LEAN_DEG, SQUASH, R, BUDGET, colors } from "../src/config.js";
 
 describe("config", () => {
-  it("exports TURNS = 12", () => {
-    expect(TURNS).toBe(12);
+  it("exports TURNS = 6", () => {
+    expect(TURNS).toBe(6);
   });
 
   it("exports LEAN_DEG = 32", () => {
     expect(LEAN_DEG).toBe(32);
   });
 
-  it("exports SQUASH = 0.40", () => {
-    expect(SQUASH).toBe(0.40);
+  it("exports SQUASH = 0.45", () => {
+    expect(SQUASH).toBe(0.45);
+  });
+
+  it("exports R = 250", () => {
+    expect(R).toBe(250);
   });
 
   it("exports BUDGET = 60_000", () => {
