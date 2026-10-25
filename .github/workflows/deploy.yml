@@ -1,0 +1,54 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "data/**"
+      - "index.html"
+      - "deploy/Dockerfile"
+      - ".github/workflows/deploy.yml"
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: ghcr.io/littleseneca/history-helix:${{ github.sha }},ghcr.io/littleseneca/history-helix:latest
+
+  # ── Roll-out notes ──────────────────────────────────────────
+  # The image above lands at ghcr.io/littleseneca/history-helix.
+  #
+  # To apply to the k3s cluster (human-gated after merge):
+  #   1. Create the namespace:  kubectl create ns history-helix
+  #   2. Create a GHCR pull secret (if not already present):
+  #        kubectl create secret docker-registry ghcr-pull-secret \
+  #          --docker-server=ghcr.io --docker-username=YOUR_USER \
+  #          --docker-password=YOUR_TOKEN -n history-helix
+  #   3. Apply manifests:
+  #        kubectl apply -f deploy/k8s/deployment.yaml
+  #        kubectl apply -f deploy/k8s/service.yaml
+  #        kubectl apply -f deploy/k8s/httproute.yaml
+  #        kubectl -n history-helix set image deployment/history-helix \
+  #          history-helix=ghcr.io/littleseneca/history-helix:${{ github.sha }}
+  #
+  # The HTTPRoute attaches to Gateway kube-system/edge (sectionName: web)
+  # and serves at https://helix.brooks-security.com after Traefik picks up
+  # the route. No auth gate — public viz.

@@ -16,7 +16,19 @@ Nobody styled that. It is the data.
   with cited anchor points where the series is thin (pre-1500).
 - **Strands are sampled lives**, not every human who ever lived. Density is scaled to real
   population, so the bundle is honest about *how many* without drawing *all* of them.
-- Every series carries provenance. See `docs/DESIGN.md` and (once generated) `data/provenance.md`.
+- Every series carries provenance. See **[data/provenance.md](data/provenance.md)** for the full
+  source listing, retrieval dates, licenses, transformations, and known gaps.
+
+## Deploy
+
+The app is a static site served from `dist/` via nginx:alpine, deployed on the k3s cluster
+behind the existing Traefik Gateway at **[helix.brooks-security.com](https://helix.brooks-security.com)**.
+
+- **Dockerfile:** `deploy/Dockerfile` — multi-stage Node build → nginx:alpine.
+- **Kubernetes manifests:** `deploy/k8s/` — Deployment, Service (ClusterIP), HTTPRoute
+  (Gateway `kube-system/edge`, `sectionName: web`).
+- **CI/CD:** `.github/workflows/ci.yml` (lint + test), `.github/workflows/deploy.yml`
+  (build image → push to GHCR).
 
 ## Status
 
@@ -30,3 +42,11 @@ npm run dev      # vite dev server
 npm test         # vitest
 npm run build    # static dist/
 ```
+
+### Accessibility
+
+- **Reduced motion:** respects `prefers-reduced-motion: reduce` — all animations and transitions
+  are disabled.
+- **Keyboard navigation:** event markers are focusable (Tab), Arrow keys pan, +/- zoom, Enter/Space
+  shows event tooltips. The SVG overlay carries an `aria-label` describing keyboard controls.
+- **Responsive:** no horizontal overflow at 320 px, tap targets ≥ 64 px on small screens.

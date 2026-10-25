@@ -10,7 +10,7 @@ import { drawOverlay, onAnchorsRendered } from "./render/overlay.js";
 import { tMin, tMax } from "./geometry/helix.js";
 import { BUDGET } from "./config.js";
 import * as viewport from "./interaction/viewport.js";
-import { initHover, setEventAnchors, setCohorts } from "./interaction/hover.js";
+import { initHover, setEventAnchors, setCohorts, showTooltipForEvent } from "./interaction/hover.js";
 import {
   toggleCategory,
   isCategoryVisible,
@@ -166,6 +166,22 @@ async function init() {
     if (e.key === "Escape" && panel.searchInput.input.value) {
       panel.searchInput.input.value = "";
       panel.searchInput.dropdown.style.display = "none";
+    }
+
+    // Enter/Space on a focused event marker → show tooltip
+    if ((e.key === "Enter" || e.key === " ") && e.target.tagName === "circle") {
+      e.preventDefault();
+      const eventId = e.target.getAttribute("data-event-id");
+      // Find the event and show tooltip at the circle's screen position
+      const circle = e.target;
+      const cx = parseFloat(circle.getAttribute("cx"));
+      const cy = parseFloat(circle.getAttribute("cy"));
+      // Look up the full event record from anchor data
+      const anchors = window.__lastAnchors || [];
+      const match = anchors.find((a) => (a.event.id || "") === eventId);
+      if (match) {
+        showTooltipForEvent(match.event, cx, cy);
+      }
     }
   });
 

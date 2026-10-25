@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: history-helix
+    app.kubernetes.io/part-of: history-helix
+  name: history-helix
+  namespace: history-helix
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: history-helix
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http

@@ -35,11 +35,66 @@
         height: 100%;
         pointer-events: none;
       }
+      /* Focus-visible ring for keyboard users on SVG interactive elements */
+      #overlay circle[tabindex="0"]:focus-visible {
+        outline: 2px solid #d4a853;
+        outline-offset: 4px;
+      }
+
+      /* ── Reduced motion ────────────────────────────────── */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      /* ── Responsive: small screens (≤ 480px, covers 320px) ── */
+      @media (max-width: 480px) {
+        #helix-search {
+          top: 8px;
+          right: 8px;
+        }
+        #helix-search input {
+          width: 130px;
+          padding: 10px 8px;
+          font-size: 16px;           /* prevent iOS zoom on focus */
+          min-height: 44px;
+        }
+        #helix-filters {
+          left: 4px;
+          gap: 6px;
+        }
+        #helix-filters button {
+          padding: 10px 12px;
+          font-size: 13px;
+          min-height: 44px;
+          min-width: 64px;
+        }
+        #helix-era-banner {
+          top: 6px;
+          font-size: 11px;
+          padding: 4px 10px;
+        }
+        #helix-legend {
+          bottom: 6px;
+          left: 4px;
+          font-size: 9px;
+          gap: 4px;
+          flex-wrap: wrap;
+          max-width: calc(100vw - 8px);
+        }
+        #helix-tooltip {
+          max-width: 200px;
+          font-size: 11px;
+        }
+      }
     </style>
   </head>
   <body>
     <canvas id="scene"></canvas>
-    <svg id="overlay"></svg>
+    <svg id="overlay" role="img" aria-label="History Helix — a corkscrew visualization of 12,000 years of human history. Use Arrow keys to pan, plus and minus keys to zoom."></svg>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

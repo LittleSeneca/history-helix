@@ -29,3 +29,13 @@ export const LOD_SITELINK_THRESHOLDS = [
 // Label track layout (DESIGN.md §2.4)
 export const TRACK_GAP = 22;
 export const LABEL_OFFSET_X = 80;
+
+// ── Accessibility ────────────────────────────────────────────
+
+/**
+ * Check whether the user prefers reduced motion.
+ * @returns {boolean}
+ */
+export function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}

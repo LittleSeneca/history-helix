@@ -227,6 +227,17 @@ function _hideTooltip() {
   }
 }
 
+/**
+ * Show tooltip for an event at specific screen coordinates.
+ * Used by keyboard navigation (Enter/Space on focused circles).
+ * @param {object} event - event record
+ * @param {number} sx - screen x
+ * @param {number} sy - screen y
+ */
+export function showTooltipForEvent(event, sx, sy) {
+  _showTooltip(event, sx, sy);
+}
+
 // ── Event handlers ──────────────────────────────────────────
 
 function _onPointerMove(e) {

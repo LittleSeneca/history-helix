@@ -62,6 +62,9 @@ export function drawOverlay(svg, vw, vh, events, hiddenCategories) {
     drawEvents(g, events, hiddenCategories, anchorList);
   }
 
+  // Store on window for keyboard tooltip access
+  window.__lastAnchors = anchorList;
+
   // Notify hover system
   if (_onAnchorsRendered) {
     _onAnchorsRendered(anchorList);
@@ -222,14 +225,18 @@ function drawEvents(g, events, hiddenCategories, anchorList) {
     line.setAttribute("data-category", e.category || "");
     g.appendChild(line);
 
-    // Event marker (small circle at anchor)
+    // Event marker (small circle at anchor) — keyboard-focusable
     const circ = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     circ.setAttribute("cx", anchor.x);
     circ.setAttribute("cy", anchor.y);
     circ.setAttribute("r", "3");
     circ.setAttribute("fill", color);
     circ.setAttribute("opacity", "0.8");
-    circ.setAttribute("pointer-events", "none");
+    circ.setAttribute("pointer-events", "auto");
+    circ.setAttribute("tabindex", "0");
+    circ.setAttribute("role", "button");
+    const yearLabel = e.year < 0 ? `${Math.abs(e.year)} BCE` : `${e.year} CE`;
+    circ.setAttribute("aria-label", `${e.title || "Event"} — ${yearLabel}, ${e.category || ""}`);
     circ.setAttribute("data-event-id", e.id || "");
     circ.setAttribute("data-category", e.category || "");
     g.appendChild(circ);
