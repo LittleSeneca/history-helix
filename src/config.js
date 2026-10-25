@@ -6,6 +6,10 @@ export const LEAN_DEG = 32;
 export const SQUASH = 0.45;
 export const BUDGET = 60_000;
 
+// Timeline span (astronomical year numbering: BCE = negative, no year zero)
+export const tMin = -2000;
+export const tMax = 2026;
+
 // Era-based color map (DESIGN.md §5 question 4: color-by-era recommended).
 // Keys are era start years (BCE negative, no year zero). Values are CSS hex.
 export const colors = {

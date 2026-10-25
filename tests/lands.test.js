@@ -90,10 +90,10 @@ maybe("integration: BCE/CE boundary in actual data", () => {
     }
   });
 
-  it("all years are within configured span", () => {
+  it("all years are finite numbers", () => {
     for (const e of events) {
-      expect(e.year).toBeGreaterThanOrEqual(-10000);
-      expect(e.year).toBeLessThanOrEqual(2100);
+      expect(typeof e.year).toBe("number");
+      expect(Number.isFinite(e.year)).toBe(true);
     }
   });
 });

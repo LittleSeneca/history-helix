@@ -97,3 +97,42 @@ export function lifeExp(year) {
 export function isLoaded() {
   return _popData !== null && _leData !== null;
 }
+
+// ── People data (real individuals, B-3) ─────────────────────
+
+let _people = null;
+
+/**
+ * Fetch and cache the people dataset (data/people.json).
+ * Call once at bootstrap; returns the raw data.
+ * @returns {Promise<object>}
+ */
+export async function loadPeople() {
+  const resp = await fetch("/data/people.json");
+  if (!resp.ok) {
+    throw new Error(`Failed to load people: ${resp.status}`);
+  }
+  const data = await resp.json();
+  _people = data.people || [];
+  return _people;
+}
+
+/**
+ * Return the loaded people array.
+ * Requires loadPeople() to have been called first.
+ * @returns {object[]}
+ */
+export function getPeople() {
+  if (!_people) {
+    throw new Error("People not loaded. Call loadPeople() first.");
+  }
+  return _people;
+}
+
+/**
+ * True if people have been loaded.
+ * @returns {boolean}
+ */
+export function peopleLoaded() {
+  return _people !== null;
+}

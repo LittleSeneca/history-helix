@@ -207,3 +207,81 @@ describe("strandPoints(u0, u1, rho, phase)", () => {
     expect(p1.y).toBeCloseTo(p2.y, 10);
   });
 });
+
+// ── Real-people strand tests (B-3, coil.js) ─────────────────
+
+import { peopleStrands } from "../src/geometry/coil.js";
+
+describe("peopleStrands(people, tStart, tEnd)", () => {
+  const samplePeople = [
+    { id: "abc", name: "Alpha", birth: -1000, death: -900 },
+    { id: "def", name: "Beta",  birth: 1500,  death: 1580 },
+    { id: "ghi", name: "Gamma", birth: 1900,  death: 1970 },
+    // Outside range (before tMin)
+    { id: "out1", name: "Prehistoric", birth: -3000, death: -2800 },
+    // Outside range (after tMax)
+    { id: "out2", name: "Futureborn",  birth: 2050,  death: 2100 },
+  ];
+
+  it("returns one strand per in-range person", () => {
+    const { strands, filtered } = peopleStrands(samplePeople, tMin, tMax);
+    // 3 in-range, 2 filtered
+    expect(strands.length).toBe(3);
+    expect(filtered).toBe(2);
+  });
+
+  it("strands have correct structure", () => {
+    const { strands } = peopleStrands(samplePeople, tMin, tMax);
+    for (const s of strands) {
+      expect(s).toHaveProperty("u0");
+      expect(s).toHaveProperty("u1");
+      expect(s).toHaveProperty("rho");
+      expect(s).toHaveProperty("cohortPhase");
+      expect(s).toHaveProperty("era");
+      expect(s.u0).toBeGreaterThanOrEqual(0);
+      expect(s.u0).toBeLessThanOrEqual(1);
+      expect(s.u1).toBeGreaterThanOrEqual(0);
+      expect(s.u1).toBeLessThanOrEqual(1);
+      expect(s.u1).toBeGreaterThanOrEqual(s.u0);
+    }
+  });
+
+  it("u0 and u1 are computed correctly (endpoint math)", () => {
+    const { strands } = peopleStrands(samplePeople, tMin, tMax);
+    // Alpha: birth -1000, death -900
+    const alpha = strands.find((s) => s.era === "ancient"); // -1000 is ancient era
+    expect(alpha).toBeDefined();
+    const expectedU0 = (-1000 - tMin) / (tMax - tMin);
+    const expectedU1 = (-900 - tMin) / (tMax - tMin);
+    expect(alpha.u0).toBeCloseTo(expectedU0, 10);
+    expect(alpha.u1).toBeCloseTo(expectedU1, 10);
+  });
+
+  it("deterministic rho from id hash", () => {
+    const { strands: s1 } = peopleStrands(samplePeople, tMin, tMax);
+    const { strands: s2 } = peopleStrands(samplePeople, tMin, tMax);
+    for (let i = 0; i < s1.length; i++) {
+      expect(s1[i].rho).toBe(s2[i].rho);
+      expect(s1[i].cohortPhase).toBe(s2[i].cohortPhase);
+    }
+  });
+
+  it("filters out people completely outside [tStart, tEnd]", () => {
+    const farPast = [{ id: "x", name: "X", birth: -5000, death: -4900 }];
+    const { strands, filtered } = peopleStrands(farPast, tMin, tMax);
+    expect(strands.length).toBe(0);
+    expect(filtered).toBe(1);
+  });
+
+  it("clamps u to [0, 1] when birth or death is near boundary", () => {
+    const edgeCases = [
+      { id: "e1", name: "Edge1", birth: -2000, death: -1900 },
+      { id: "e2", name: "Edge2", birth: 2000,  death: 2030 },
+    ];
+    const { strands } = peopleStrands(edgeCases, tMin, tMax);
+    // First: birth at exactly tMin
+    expect(strands[0].u0).toBeCloseTo(0, 10);
+    // Second: death beyond tMax should clamp to 1
+    expect(strands[1].u1).toBeCloseTo(1, 10);
+  });
+});
