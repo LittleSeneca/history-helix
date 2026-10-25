@@ -140,6 +140,13 @@ SELECT ?event ?eventLabel ?date ?prec ?sitelinks ?classLabel WHERE {
 - **Pitfalls to handle explicitly:**
   - **Date precision** (P585 precision: 6=decade, 7=century, 9=year, 10=month, 11=day). Year-scope only year precision; carry sub-year events at their year.
   - **No year zero.** Wikidata stores 1 BCE as year `0`. Convert with care so sorting and `u()` don't drift by one across the BCE/CE boundary.
+  - **Signed-year convention.** The project stores all years as signed integers with no year 0:
+    `1 BCE = -1`, `2 BCE = -2`, …, `N BCE = -N`; `1 CE = +1`, `2 CE = +2`, …, `N CE = +N`.
+    The pipeline normalizer (`normalize_date` in `fetch_events.py`) converts Wikidata dateTime
+    strings (where `-0000` = 1 BCE, `-0001` = 2 BCE, etc.) with the formula `-(year + 1)` for BCE
+    and guards against Wikidata's `+0000` artifact by mapping it to `1 CE`. The result is that
+    year `0` never appears in any output artifact — there is a clean gap between `-1` and `+1`.
+    Every BCE row in `data/people.json` and `data/events.json` obeys this rule.
   - **Proleptic Gregorian** — pre-1583 dates are Gregorian-normalized, not Julian. Documented, not "fixed".
   - **Dedup** — same historical event as multiple QIDs; collapse by (year ± 1, normalized title) heuristic, keep highest sitelinks.
   - **Bias** — expect heavy Western/modern skew. Record it in `provenance.md`; the curation phase exists to correct it.

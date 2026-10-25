@@ -172,31 +172,44 @@ PREC_LABELS = {
 
 
 def normalize_date(date_str: str, prec: int) -> int:
-    """Convert Wikidata dateTime string to our year integer.
+    """Convert Wikidata dateTime string to our signed-year integer.
 
-    Wikidata quirks handled:
-    - 1 BCE is stored as year 0 (no year zero in historical convention)
-    - Precision-based midpoint placement is handled downstream in normalize_event().
+    Convention: **signed-year numbering** with no year zero.
+        1 BCE → -1,  2 BCE → -2,  …,  N BCE → -N
+        1 CE  → +1,  2 CE  → +2,  …,  N CE  → +N
 
-    Returns the raw parsed year — midpoint adjustment happens later.
+    Wikidata represents BCE dates with a minus sign and a zero-based year:
+        1 BCE → \"-0000\",  2 BCE → \"-0001\",  …,  N BCE → \"-{N-1:04d}\"
+    The conversion is:
+        - Parse the sign and absolute year from the raw string.
+        - For BCE:  return -(year + 1).   (year=0 → -1 = 1 BCE)
+        - For CE:   guard year=0 (a Wikidata artifact for uncertain
+          boundary dates) → treat as 1 CE.
+        - Result: never returns 0.
+
+    Precision-based midpoint placement is handled downstream in normalize_event().
     """
-    # Parse the date string: "+1945-08-15T00:00:00Z" or "-0044-03-15T00:00:00Z"
-    sign = 1
     s = date_str
     if s.startswith("-"):
         sign = -1
         s = s[1:]
     else:
+        sign = 1
         s = s.lstrip("+")
 
     parts = s.split("-")
     year = int(parts[0])
 
     if sign == -1:
-        # Wikidata: 1 BCE = year 0. So year 0 → -1 (1 BCE), year -1 → -2 (2 BCE)
-        if year == 0:
-            return -1
-        return -year - 1
+        # Wikidata: 1 BCE → year 0,  2 BCE → year 1,  …,  N BCE → year N-1
+        # Signed-year: 1 BCE → -1,  2 BCE → -2,  …,  N BCE → -N
+        # So: -(year + 1).  year=0 → -1 ✓,  year=1 → -2 ✓,  etc.
+        return -(year + 1)
+
+    # CE: year 0 should never appear in valid Wikidata dates, but if it does
+    # (e.g. \"+0000\" for uncertain boundary dates), treat it as 1 CE.
+    if year == 0:
+        return 1
 
     return year
 
