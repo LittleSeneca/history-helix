@@ -7,6 +7,6 @@ export default defineConfig({
     emptyOutDir: true,
   },
   test: {
-    exclude: ["**/render.spec.ts", "**/node_modules/**"],
+    exclude: ["**/*.spec.ts", "**/node_modules/**"],
   },
 });

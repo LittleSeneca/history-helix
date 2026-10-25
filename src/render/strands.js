@@ -2,10 +2,13 @@
 //
 // Strategy: group all strands by era color → one Path2D per (era, depth-half).
 // That gives at most ~14 stroke() calls total (7 eras × 2 passes), not 60,000.
+//
+// Uses the viewport module for pan/zoom transform.
 
-import { depth, getBounds, project } from "../geometry/helix.js";
+import { depth, project } from "../geometry/helix.js";
 import { strandPath } from "../geometry/coil.js";
 import { colors } from "../config.js";
+import { toScreen, getZoom } from "../interaction/viewport.js";
 
 const SPINE_SAMPLES = 2000;
 
@@ -13,23 +16,12 @@ const SPINE_SAMPLES = 2000;
 
 /**
  * Draw the bare corkscrew spine as a faint guide behind the strands.
+ * Uses the viewport transform.
  * @param {CanvasRenderingContext2D} ctx
- * @param {number} vw - viewport CSS width
- * @param {number} vh - viewport CSS height
  */
-export function drawSpine(ctx, vw, vh) {
-  const bounds = getBounds();
-  const bw = bounds.xMax - bounds.xMin;
-  const bh = bounds.yMax - bounds.yMin;
-
-  const scale = Math.min((vw * 0.9) / bw, (vh * 0.9) / bh);
-  const cx = vw / 2;
-  const cy = vh / 2;
-
+export function drawSpine(ctx) {
   ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(scale, scale);
-  ctx.translate(-bounds.cx, -bounds.cy);
+  _applyViewportTransform(ctx);
 
   ctx.beginPath();
   for (let i = 0; i <= SPINE_SAMPLES; i++) {
@@ -38,8 +30,8 @@ export function drawSpine(ctx, vw, vh) {
     else ctx.lineTo(pt.x, pt.y);
   }
 
-  ctx.strokeStyle = "rgba(90,125,154,0.15)"; // very faint slate
-  ctx.lineWidth = 0.8 / scale;
+  ctx.strokeStyle = "rgba(90,125,154,0.15)";
+  ctx.lineWidth = 0.8 / _normalizedLineWidth();
   ctx.stroke();
   ctx.restore();
 }
@@ -79,35 +71,20 @@ export function buildStrandBatches(strands) {
 // ── Rendering ───────────────────────────────────────────────
 
 /**
- * Apply the viewport transform (center + scale to fit).
- * Returns the scale factor for line-width normalization.
- *
+ * Apply the interactive viewport transform to the canvas context.
+ * All subsequent drawing uses scene coordinates directly.
  * @param {CanvasRenderingContext2D} ctx
- * @param {number} vw
- * @param {number} vh
- * @returns {{scale: number, set():void, restore():void}}
  */
-function applyViewport(ctx, vw, vh) {
-  const bounds = getBounds();
-  const bw = bounds.xMax - bounds.xMin;
-  const bh = bounds.yMax - bounds.yMin;
+function _applyViewportTransform(ctx) {
+  const dpr = window.devicePixelRatio || 1;
+  const zoom = getZoom();
+  // toScreen returns CSS pixels. Canvas backing store is in device pixels (CSS × dpr).
+  const vp = toScreen(0, 0); // CSS-pixel position of scene origin on screen
+  ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, vp.x * dpr, vp.y * dpr);
+}
 
-  const scale = Math.min((vw * 0.92) / bw, (vh * 0.92) / bh);
-
-  ctx.save();
-  ctx.translate(vw / 2, vh / 2);
-  ctx.scale(scale, scale);
-  ctx.translate(-bounds.cx, -bounds.cy);
-
-  return {
-    scale,
-    set() {
-      // Already applied by the save/translate above
-    },
-    restore() {
-      ctx.restore();
-    },
-  };
+function _normalizedLineWidth() {
+  return Math.max(0.3, getZoom());
 }
 
 /**
@@ -115,17 +92,18 @@ function applyViewport(ctx, vw, vh) {
  *
  * @param {CanvasRenderingContext2D} ctx
  * @param {Map<string,{back:Path2D,front:Path2D}>} batches
- * @param {number} vw - viewport CSS width
- * @param {number} vh - viewport CSS height
  */
-export function drawStrands(ctx, batches, vw, vh) {
-  const vp = applyViewport(ctx, vw, vh);
+export function drawStrands(ctx, batches) {
+  ctx.save();
+  _applyViewportTransform(ctx);
+
+  const lw = 0.8 / _normalizedLineWidth();
 
   // Pass 1: back half (depth < 0)
   for (const [era, batch] of batches) {
     const color = colors[era] || "#888888";
     ctx.strokeStyle = color;
-    ctx.lineWidth = 0.8 / vp.scale;
+    ctx.lineWidth = lw;
     ctx.globalAlpha = 0.35;
     ctx.stroke(batch.back);
   }
@@ -134,29 +112,29 @@ export function drawStrands(ctx, batches, vw, vh) {
   for (const [era, batch] of batches) {
     const color = colors[era] || "#888888";
     ctx.strokeStyle = color;
-    ctx.lineWidth = 1.0 / vp.scale;
+    ctx.lineWidth = lw;
     ctx.globalAlpha = 0.55;
     ctx.stroke(batch.front);
   }
 
   ctx.globalAlpha = 1;
-  vp.restore();
+  ctx.restore();
 }
 
 // ── Full render orchestration ───────────────────────────────
 
 /**
- * Render the full scene: faint spine + batched strands.
+ * Render the full canvas scene: faint spine + batched strands.
  *
  * @param {CanvasRenderingContext2D} ctx
  * @param {Map<string,{back:Path2D,front:Path2D}>} batches
- * @param {number} vw
- * @param {number} vh
+ * @param {number} vw - viewport CSS width (unused — viewport handles sizing)
+ * @param {number} vh - viewport CSS height (unused — viewport handles sizing)
  */
 export function renderScene(ctx, batches, vw, vh) {
   ctx.clearRect(0, 0, vw, vh);
-  drawSpine(ctx, vw, vh);
+  drawSpine(ctx);
   if (batches && batches.size > 0) {
-    drawStrands(ctx, batches, vw, vh);
+    drawStrands(ctx, batches);
   }
 }

@@ -1,9 +1,13 @@
 // SVG overlay rendering — era markers, event markers, leader lines, labels
 // (DESIGN.md §2.4, §4.4)
+//
+// Uses the viewport module's toScreen() for transforms.
+// Emits event anchor positions for hover hit-testing via a callback.
 
-import { project, u, depth, tMin, tMax, getBounds } from "../geometry/helix.js";
-import { TURNS, TRACK_GAP, LABEL_OFFSET_X, colors } from "../config.js";
+import { project, u, depth, tMin, tMax } from "../geometry/helix.js";
+import { TURNS, TRACK_GAP, LABEL_OFFSET_X, colors, LOD_SITELINK_THRESHOLDS } from "../config.js";
 import { assignTracks, maxTrack } from "./labels.js";
+import { toScreen, getLODThreshold } from "../interaction/viewport.js";
 
 const SPINE_SAMPLES = 2000;
 
@@ -19,65 +23,66 @@ const CATEGORY_COLORS = {
   economy: "#4a6b5d",
 };
 
+/** @type {function|null} callback receiving {event, sx, sy}[] after each render */
+let _onAnchorsRendered = null;
+
+/**
+ * Register a callback to receive event anchor positions after each overlay render.
+ * @param {function} cb — receives array of {event, sx, sy}
+ */
+export function onAnchorsRendered(cb) {
+  _onAnchorsRendered = cb;
+}
+
 /**
  * Draw the full SVG overlay on the given SVG element.
  * @param {SVGSVGElement} svg
  * @param {number} vw - viewport width
  * @param {number} vh - viewport height
  * @param {Object[]} events - normalized event records from events.json
- * @param {number} [padding=0.9]
+ * @param {Set<string>} [hiddenCategories] - categories to hide
  */
-export function drawOverlay(svg, vw, vh, events, padding = 0.9) {
-  const bounds = getBounds();
-  const bw = bounds.xMax - bounds.xMin;
-  const bh = bounds.yMax - bounds.yMin;
-  const scale = Math.min((vw * padding) / bw, (vh * padding) / bh);
-  const cx = vw / 2;
-  const cy = vh / 2;
-
-  // Transform from scene space to SVG space
-  function toScreen(sx, sy) {
-    return {
-      x: cx + (sx - bounds.cx) * scale,
-      y: cy + (sy - bounds.cy) * scale,
-    };
-  }
-
+export function drawOverlay(svg, vw, vh, events, hiddenCategories) {
   // Clear SVG
   while (svg.firstChild) svg.firstChild.remove();
 
-  // Create main group with transform
+  // Create main group
   const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
   svg.appendChild(g);
 
-  // ── 1. Helix guide line (subtle) ──────────────────────────
-  drawHelixGuide(g, bounds, scale, cx, cy);
+  // 1. Helix guide line (subtle)
+  drawHelixGuide(g);
 
-  // ── 2. Era markers (century tick labels) ──────────────────
-  drawEraMarkers(g, bounds, scale, cx, cy);
+  // 2. Era markers (century tick labels)
+  drawEraMarkers(g);
 
-  // ── 3. Event markers + leader lines + labels ──────────────
+  // 3. Event markers + leader lines + labels
+  const anchorList = [];
   if (events && events.length > 0) {
-    drawEvents(g, events, bounds, scale, cx, cy, vw, vh);
+    drawEvents(g, events, hiddenCategories, anchorList);
+  }
+
+  // Notify hover system
+  if (_onAnchorsRendered) {
+    _onAnchorsRendered(anchorList);
   }
 }
 
 /**
  * Draw the subtle helix guide line on the SVG overlay.
  */
-function drawHelixGuide(g, bounds, scale, cx, cy) {
+function drawHelixGuide(g) {
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   let d = "";
 
   for (let i = 0; i <= SPINE_SAMPLES; i++) {
     const up = i / SPINE_SAMPLES;
     const p = project(up);
-    const sx = cx + (p.x - bounds.cx) * scale;
-    const sy = cy + (p.y - bounds.cy) * scale;
+    const s = toScreen(p.x, p.y);
     if (i === 0) {
-      d += `M ${sx} ${sy}`;
+      d += `M ${s.x} ${s.y}`;
     } else {
-      d += ` L ${sx} ${sy}`;
+      d += ` L ${s.x} ${s.y}`;
     }
   }
 
@@ -93,7 +98,7 @@ function drawHelixGuide(g, bounds, scale, cx, cy) {
 /**
  * Draw century and era markers along the coil.
  */
-function drawEraMarkers(g, bounds, scale, cx, cy) {
+function drawEraMarkers(g) {
   const eras = [
     { year: -10000, label: "10,000 BCE" },
     { year: -5000, label: "5,000 BCE" },
@@ -115,28 +120,29 @@ function drawEraMarkers(g, bounds, scale, cx, cy) {
     const up = u(era.year);
     if (up < 0 || up > 1) continue;
     const p = project(up);
-    const sx = cx + (p.x - bounds.cx) * scale;
-    const sy = cy + (p.y - bounds.cy) * scale;
+    const s = toScreen(p.x, p.y);
 
     // Tick mark
     const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", sx - 4);
-    tick.setAttribute("y1", sy);
-    tick.setAttribute("x2", sx + 4);
-    tick.setAttribute("y2", sy);
+    tick.setAttribute("x1", s.x - 4);
+    tick.setAttribute("y1", s.y);
+    tick.setAttribute("x2", s.x + 4);
+    tick.setAttribute("y2", s.y);
     tick.setAttribute("stroke", "#8b9a8b");
     tick.setAttribute("stroke-width", "0.5");
     tick.setAttribute("opacity", "0.5");
+    tick.setAttribute("pointer-events", "none");
     g.appendChild(tick);
 
     // Label
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("x", sx + 8);
-    text.setAttribute("y", sy + 4);
+    text.setAttribute("x", s.x + 8);
+    text.setAttribute("y", s.y + 4);
     text.setAttribute("fill", "#8b9a8b");
     text.setAttribute("font-family", "monospace");
     text.setAttribute("font-size", "9");
     text.setAttribute("opacity", "0.6");
+    text.setAttribute("pointer-events", "none");
     text.textContent = era.label;
     g.appendChild(text);
   }
@@ -144,11 +150,26 @@ function drawEraMarkers(g, bounds, scale, cx, cy) {
 
 /**
  * Draw event markers with leader lines and labels.
+ * Emits {event, sx, sy} for each visible event anchor.
  */
-function drawEvents(g, events, bounds, scale, cx, cy, vw, vh) {
-  // Filter: show top events by sitelinks (LOD)
-  const sorted = [...events].sort((a, b) => b.sitelinks - a.sitelinks);
-  const toShow = sorted.slice(0, 200); // cap at 200 labels to avoid explosion
+function drawEvents(g, events, hiddenCategories, anchorList) {
+  const lodThreshold = getLODThreshold();
+
+  // Filter by LOD sitelink threshold
+  const filtered = events.filter(
+    (e) => (e.sitelinks || 0) >= lodThreshold,
+  );
+
+  // Filter by hidden categories
+  const visible = hiddenCategories
+    ? filtered.filter((e) => !hiddenCategories.has(e.category))
+    : filtered;
+
+  // Sort by sitelinks desc, cap at 200
+  const sorted = [...visible].sort((a, b) => b.sitelinks - a.sitelinks);
+  const toShow = sorted.slice(0, 200);
+
+  if (toShow.length === 0) return;
 
   // Compute anchor positions
   const positioned = toShow.map((e) => {
@@ -164,7 +185,6 @@ function drawEvents(g, events, bounds, scale, cx, cy, vw, vh) {
 
   // Assign tracks
   const placements = assignTracks(positioned);
-  const maxT = maxTrack(placements) + 1;
 
   // Draw each event
   for (let i = 0; i < positioned.length; i++) {
@@ -175,20 +195,21 @@ function drawEvents(g, events, bounds, scale, cx, cy, vw, vh) {
     const color = CATEGORY_COLORS[e.category] || "#c49a6c";
 
     // Anchor point in screen space
-    const anchor = {
-      x: cx + (e.anchorX - bounds.cx) * scale,
-      y: cy + (e.anchorY - bounds.cy) * scale,
-    };
+    const anchor = toScreen(e.anchorX, e.anchorY);
+
+    // Emit anchor for hover
+    anchorList.push({ event: e, sx: anchor.x, sy: anchor.y });
 
     // Label position
     const labelXDir = pl.side === "left" ? -1 : 1;
-    const labelX = anchor.x + labelXDir * (LABEL_OFFSET_X + pl.track * 20);
+    const trackOffset = LABEL_OFFSET_X + pl.track * 20;
+    const labelX = anchor.x + labelXDir * trackOffset;
     const labelY = anchor.y;
 
     // Elbow point (midway in X, same Y as anchor)
     const elbowX = anchor.x + labelXDir * LABEL_OFFSET_X * 0.6;
 
-    // ── Leader line ─────────────────────────────────────
+    // Leader line
     const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
     const pts = `${anchor.x},${anchor.y} ${elbowX},${anchor.y} ${labelX},${labelY}`;
     line.setAttribute("points", pts);
@@ -197,19 +218,23 @@ function drawEvents(g, events, bounds, scale, cx, cy, vw, vh) {
     line.setAttribute("stroke-width", "0.6");
     line.setAttribute("opacity", "0.4");
     line.setAttribute("pointer-events", "none");
+    line.setAttribute("data-event-id", e.id || "");
+    line.setAttribute("data-category", e.category || "");
     g.appendChild(line);
 
-    // ── Event marker (small circle at anchor) ───────────
+    // Event marker (small circle at anchor)
     const circ = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     circ.setAttribute("cx", anchor.x);
     circ.setAttribute("cy", anchor.y);
-    circ.setAttribute("r", "2.5");
+    circ.setAttribute("r", "3");
     circ.setAttribute("fill", color);
-    circ.setAttribute("opacity", "0.7");
+    circ.setAttribute("opacity", "0.8");
     circ.setAttribute("pointer-events", "none");
+    circ.setAttribute("data-event-id", e.id || "");
+    circ.setAttribute("data-category", e.category || "");
     g.appendChild(circ);
 
-    // ── Label ───────────────────────────────────────────
+    // Label text
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     const textAnchor = pl.side === "left" ? "end" : "start";
     const tx = pl.side === "left" ? labelX - 4 : labelX + 4;
@@ -221,6 +246,9 @@ function drawEvents(g, events, bounds, scale, cx, cy, vw, vh) {
     text.setAttribute("font-family", "sans-serif");
     text.setAttribute("font-size", "10");
     text.setAttribute("opacity", "0.8");
+    text.setAttribute("pointer-events", "none");
+    text.setAttribute("data-event-id", e.id || "");
+    text.setAttribute("data-category", e.category || "");
 
     if (pl.clustered && pl.clusterSize > 1) {
       text.textContent = `+${pl.clusterSize} more`;
@@ -229,7 +257,7 @@ function drawEvents(g, events, bounds, scale, cx, cy, vw, vh) {
       const yearLabel = e.year < 0 ? `${Math.abs(e.year)} BCE` : `${e.year} CE`;
       const maxLen = 30;
       let title = e.title;
-      if (title.length > maxLen) title = title.slice(0, maxLen - 1) + "…";
+      if (title.length > maxLen) title = title.slice(0, maxLen - 1) + "\u2026";
       text.textContent = `${title} (${yearLabel})`;
     }
 
