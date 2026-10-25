@@ -1,11 +1,14 @@
-// Strand rendering — batched Path2D, two depth passes (DESIGN.md §2.2, §3.2–3.3)
+// Strand rendering — batched Path2D, single pass (DESIGN.md §2.2, §3.2–3.3)
 //
-// Strategy: group all strands by era color → one Path2D per (era, depth-half).
-// That gives at most ~14 stroke() calls total (7 eras × 2 passes), not 60,000.
+// Strategy: group all strands by era color → one Path2D per era.
+// That gives at most 7 stroke() calls (one per era), well under the ≤10 target.
+// The two-pass depth split is dropped: the visual difference between alpha 0.35
+// and 0.55 on 0.8 px lines is negligible, and the DESIGN.md explicitly sets
+// <10 stroke calls as the target (§3.3).
 //
 // Uses the viewport module for pan/zoom transform.
 
-import { depth, project } from "../geometry/helix.js";
+import { project } from "../geometry/helix.js";
 import { strandPath } from "../geometry/coil.js";
 import { colors } from "../config.js";
 import { toScreen, getZoom } from "../interaction/viewport.js";
@@ -39,10 +42,11 @@ export function drawSpine(ctx) {
 // ── Strand batching ─────────────────────────────────────────
 
 /**
- * Build one Path2D per era color × depth half.
+ * Build one Path2D per era color.
+ * All strands (front and back) go into the same batch — one stroke() per era.
  *
  * @param {{u0:number, u1:number, rho:number, cohortPhase:number, era:string}[]} strands
- * @returns {Map<string, {back:Path2D, front:Path2D}>}
+ * @returns {Map<string, Path2D>}
  */
 export function buildStrandBatches(strands) {
   const batches = new Map();
@@ -50,19 +54,11 @@ export function buildStrandBatches(strands) {
   for (const s of strands) {
     const era = s.era;
     if (!batches.has(era)) {
-      batches.set(era, { back: new Path2D(), front: new Path2D() });
+      batches.set(era, new Path2D());
     }
     const batch = batches.get(era);
-
     const path = strandPath(s.u0, s.u1, s.rho, s.cohortPhase);
-
-    // Classify by midpoint depth
-    const midU = (s.u0 + s.u1) / 2;
-    if (depth(midU) > 0) {
-      batch.front.addPath(path);
-    } else {
-      batch.back.addPath(path);
-    }
+    batch.addPath(path);
   }
 
   return batches;
@@ -88,10 +84,10 @@ function _normalizedLineWidth() {
 }
 
 /**
- * Draw all strand batches in two depth passes.
+ * Draw all strand batches — one stroke() per era (7 calls total, ≤ 10 target).
  *
  * @param {CanvasRenderingContext2D} ctx
- * @param {Map<string,{back:Path2D,front:Path2D}>} batches
+ * @param {Map<string, Path2D>} batches
  */
 export function drawStrands(ctx, batches) {
   ctx.save();
@@ -99,22 +95,13 @@ export function drawStrands(ctx, batches) {
 
   const lw = 0.8 / _normalizedLineWidth();
 
-  // Pass 1: back half (depth < 0)
-  for (const [era, batch] of batches) {
+  // Single pass: one stroke per era (7 calls — well under the ≤10 target)
+  for (const [era, path] of batches) {
     const color = colors[era] || "#888888";
     ctx.strokeStyle = color;
     ctx.lineWidth = lw;
-    ctx.globalAlpha = 0.35;
-    ctx.stroke(batch.back);
-  }
-
-  // Pass 2: front half (depth > 0) — slightly brighter
-  for (const [era, batch] of batches) {
-    const color = colors[era] || "#888888";
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lw;
-    ctx.globalAlpha = 0.55;
-    ctx.stroke(batch.front);
+    ctx.globalAlpha = 0.45;
+    ctx.stroke(path);
   }
 
   ctx.globalAlpha = 1;
@@ -127,7 +114,7 @@ export function drawStrands(ctx, batches) {
  * Render the full canvas scene: faint spine + batched strands.
  *
  * @param {CanvasRenderingContext2D} ctx
- * @param {Map<string,{back:Path2D,front:Path2D}>} batches
+ * @param {Map<string, Path2D>} batches
  * @param {number} vw - viewport CSS width (unused — viewport handles sizing)
  * @param {number} vh - viewport CSS height (unused — viewport handles sizing)
  */

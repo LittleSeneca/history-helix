@@ -36,11 +36,11 @@ USER_AGENT = (
     "HistoryHelix/0.1 (https://github.com/LittleSeneca/history-helix; "
     "shiloh@brooks-security.com) Wikidata events pipeline"
 )
-SITELINK_MIN = 15
+SITELINK_MIN = int(os.environ.get("HISTORY_HELIX_SITELINK_MIN", "10"))
 YEAR_MIN = -10000
 YEAR_MAX = 2100
 CHUNK_DELAY = 1.5  # seconds between chunked queries (be polite to WDQS)
-CHUNK_SIZE_YEARS = 500  # split queries into chunks for reliability
+CHUNK_SIZE_YEARS = 200  # split queries into chunks for reliability (reduced from 500 in A-8 to avoid WDQS 504 timeouts on dense modern periods)
 FETCH_TIMEOUT = 120  # seconds
 
 
@@ -176,8 +176,9 @@ def normalize_date(date_str: str, prec: int) -> int:
 
     Wikidata quirks handled:
     - 1 BCE is stored as year 0 (no year zero in historical convention)
-    - Precision 6-7: use the representative year (e.g. century 1801-1900 → 1850)
-    - Precision 8: decade (e.g. 1940-1949 → 1945)
+    - Precision-based midpoint placement is handled downstream in normalize_event().
+
+    Returns the raw parsed year — midpoint adjustment happens later.
     """
     # Parse the date string: "+1945-08-15T00:00:00Z" or "-0044-03-15T00:00:00Z"
     sign = 1
@@ -226,9 +227,10 @@ def normalize_event(row: dict, class_label_map: dict) -> dict | None:
         year = (year // 10) * 10 + 5  # midpoint of decade
     elif prec == PREC_CENTURY:
         year = (year // 100) * 100 + 50  # midpoint of century
-    elif prec < PREC_CENTURY:
-        # Millennium or coarser — use midpoint of range
-        pass  # keep as-is, precision noted
+    elif prec == 6:
+        # Millennium — midpoint (e.g. 2nd millennium CE → 1500)
+        year = (year // 1000) * 1000 + 500
+    # prec < 6: geological/archaeological scale — leave as-is, precision noted
 
     # Filter to our time span
     if year < YEAR_MIN or year > YEAR_MAX:
@@ -305,10 +307,25 @@ def fetch_all(classes: list[dict]) -> list[dict]:
         chunk_end = min(chunk_start + CHUNK_SIZE_YEARS - 1, YEAR_MAX)
         print(f"  Fetching {chunk_start}–{chunk_end} ...", end=" ", flush=True)
 
-        try:
-            data = cached_query(build_sparql(qids, chunk_start, chunk_end))
-        except Exception as e:
-            print(f"ERROR: {e}")
+        data = None
+        retries = 0
+        max_retries = 3
+        while data is None and retries <= max_retries:
+            try:
+                data = cached_query(build_sparql(qids, chunk_start, chunk_end))
+            except urllib.error.HTTPError as e:
+                retries += 1
+                if retries <= max_retries:
+                    wait = 2 ** retries  # 2, 4, 8 seconds backoff
+                    print(f"HTTP {e.code} (retry {retries}/{max_retries} in {wait}s)...", end=" ", flush=True)
+                    time.sleep(wait)
+                else:
+                    print(f"ERROR: HTTP {e.code} after {max_retries} retries")
+            except Exception as e:
+                print(f"ERROR: {e}")
+                break
+
+        if data is None:
             print("  (continuing with next chunk)")
             continue
 

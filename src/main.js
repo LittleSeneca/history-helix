@@ -269,7 +269,7 @@ async function init() {
     // Build batched Path2Ds
     strandBatches = buildStrandBatches(strands);
     console.log(
-      `[history-helix] batches: ${strandBatches.size} eras × 2 passes = ~${strandBatches.size * 2} stroke() calls`,
+      `[history-helix] batches: ${strandBatches.size} eras → ${strandBatches.size} stroke() calls`,
     );
 
     // Pass cohort data to hover system for strand hit-testing
