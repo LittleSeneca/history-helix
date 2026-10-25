@@ -134,13 +134,52 @@ class TestDateParsing:
         assert person["death"] == 70
 
     def test_year_zero_not_returned(self):
-        """Normalize never returns year 0."""
+        """Normalize never returns year 0 — signed-year convention."""
         # Wikidata year 0 (1 BCE) → -1
         row = _row(birth_str="-0000-01-01T00:00:00Z",
                    death_str="+0050-01-01T00:00:00Z")
         person = fp.normalize_person(row)
         assert person["birth"] != 0
         assert person["death"] != 0
+        assert person["birth"] == -1
+        # Wikidata +0000 (CE year-zero artifact) → 1 (guard)
+        row2 = _row(birth_str="+0000-01-01T00:00:00Z",
+                    death_str="+0050-01-01T00:00:00Z")
+        person2 = fp.normalize_person(row2)
+        assert person2["birth"] != 0
+        assert person2["birth"] == 1
+
+
+# ---------------------------------------------------------------------------
+# normalize_person — boundary-value table-driven tests (AC 5)
+# ---------------------------------------------------------------------------
+
+class TestBoundaryDateParsing:
+    """Table-driven boundary test for people date parsing (AC 5).
+
+    Covers: 1 BCE, 2 BCE, 245 BCE, 246 BCE, 1 CE, 100 CE.
+    Tests the integration through normalize_person, which calls normalize_date.
+    """
+
+    BOUNDARY_CASES = [
+        # (wikidata_str, expected_int, description)
+        ("-0000-01-01T00:00:00Z", -1,   "1 BCE"),
+        ("-0001-01-01T00:00:00Z", -2,   "2 BCE"),
+        ("-0244-01-01T00:00:00Z", -245, "245 BCE"),
+        ("-0245-01-01T00:00:00Z", -246, "246 BCE"),
+        ("+0001-01-01T00:00:00Z", 1,    "1 CE"),
+        ("+0100-01-01T00:00:00Z", 100,  "100 CE"),
+    ]
+
+    def test_boundary_table(self):
+        for wd, expected, desc in self.BOUNDARY_CASES:
+            # Death is well past all test births so birth>death never triggers
+            row = _row(birth_str=wd, death_str="+0200-01-01T00:00:00Z")
+            person = fp.normalize_person(row)
+            assert person is not None, f"{desc}: person should not be None"
+            assert person["birth"] == expected, (
+                f"{desc}: Wikidata {wd} → expected birth={expected}, got {person['birth']}"
+            )
 
 
 # ---------------------------------------------------------------------------

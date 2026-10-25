@@ -110,11 +110,48 @@ class TestNormalizeDate:
         assert fe.normalize_date("+0001-01-01T00:00:00Z", 9) == 1
 
     def test_year_zero_not_in_output(self):
-        """Normalize never returns 0 (no year zero)."""
+        """Normalize never returns 0 — no year zero in signed-year convention."""
         # Wikidata year -0000 (1 BCE) → -1
         assert fe.normalize_date("-0000-01-01T00:00:00Z", 9) != 0
+        assert fe.normalize_date("-0000-01-01T00:00:00Z", 9) == -1
         # Wikidata year +0001 (1 CE) → 1
         assert fe.normalize_date("+0001-01-01T00:00:00Z", 9) != 0
+        assert fe.normalize_date("+0001-01-01T00:00:00Z", 9) == 1
+        # Wikidata year +0000 (CE year-zero artifact) → 1 (guard)
+        assert fe.normalize_date("+0000-01-01T00:00:00Z", 9) != 0
+        assert fe.normalize_date("+0000-01-01T00:00:00Z", 9) == 1
+        # Wikidata year 0000 (no sign, CE year-zero artifact) → 1 (guard)
+        assert fe.normalize_date("0000-01-01T00:00:00Z", 9) != 0
+        assert fe.normalize_date("0000-01-01T00:00:00Z", 9) == 1
+
+
+    # ---------------------------------------------------------------------------
+# normalize_date — boundary-value table-driven tests (AC 5)
+# ---------------------------------------------------------------------------
+
+class TestBoundaryNormalizeDate:
+    """Table-driven boundary test for BCE/CE year parsing (AC 5).
+
+    Covers: 1 BCE, 2 BCE, 245 BCE, 246 BCE, 1 CE, 100 CE.
+    Also verifies Wikidata convention mapping: N BCE → Wikidata year N-1.
+    """
+
+    BOUNDARY_CASES = [
+        # (wikidata_str, prec, expected, description)
+        ("-0000-01-01T00:00:00Z", 9, -1,   "1 BCE"),
+        ("-0001-01-01T00:00:00Z", 9, -2,   "2 BCE"),
+        ("-0244-01-01T00:00:00Z", 9, -245, "245 BCE"),
+        ("-0245-01-01T00:00:00Z", 9, -246, "246 BCE"),
+        ("+0001-01-01T00:00:00Z", 9, 1,    "1 CE"),
+        ("+0100-01-01T00:00:00Z", 9, 100,  "100 CE"),
+    ]
+
+    def test_boundary_table(self):
+        for wd, prec, expected, desc in self.BOUNDARY_CASES:
+            result = fe.normalize_date(wd, prec)
+            assert result == expected, (
+                f"{desc}: Wikidata {wd} → expected {expected}, got {result}"
+            )
 
 
 # ---------------------------------------------------------------------------
