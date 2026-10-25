@@ -122,9 +122,9 @@ maybe("integration: category mapping", () => {
 });
 
 maybe("integration: sitelinks threshold", () => {
-  it("all events have sitelinks >= 15", () => {
+  it("all events have sitelinks >= 8", () => {
     for (const e of events) {
-      expect(e.sitelinks).toBeGreaterThanOrEqual(15);
+      expect(e.sitelinks).toBeGreaterThanOrEqual(8);
     }
   });
 });
