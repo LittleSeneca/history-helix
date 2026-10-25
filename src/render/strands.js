@@ -109,12 +109,12 @@ export function drawPopulationEnvelope(ctx) {
   }
   ctx.closePath();
 
-  ctx.fillStyle = "rgba(90,125,154,0.06)";
+  ctx.fillStyle = "rgba(90,125,154,0.20)";
   ctx.fill();
 
-  // Subtle outline along the envelope edges
-  ctx.strokeStyle = "rgba(90,125,154,0.12)";
-  ctx.lineWidth = 0.5 / _normalizedLineWidth();
+  // Soft edge along the envelope boundary
+  ctx.strokeStyle = "rgba(90,125,154,0.30)";
+  ctx.lineWidth = 1.0 / _normalizedLineWidth();
   ctx.stroke();
 
   ctx.restore();

@@ -2,7 +2,7 @@
 // Property-based tests for assignTracks()
 
 import { describe, it, expect } from "vitest";
-import { assignTracks, maxTrack } from "../src/render/labels.js";
+import { assignTracks, maxTrack, decolideLabels, MIN_LABEL_GAP } from "../src/render/labels.js";
 import { TRACK_GAP } from "../src/config.js";
 
 /**
@@ -169,5 +169,56 @@ describe("assignTracks — property: no overlapping labels on same track", () =>
         expect(gap).toBeGreaterThanOrEqual(TRACK_GAP);
       }
     }
+  });
+});
+
+describe("decolideLabels — vertical spacing", () => {
+  it("ensures labels on the same side maintain MIN_LABEL_GAP", () => {
+    // Three labels close together on the right side
+    const events = makeEvents([100, 105, 108], [1, 1, 1]);
+    const placements = assignTracks(events);
+
+    // All should be on the right side
+    for (const p of placements) {
+      expect(p.side).toBe("right");
+    }
+
+    // Sort by labelY
+    const sorted = [...placements].sort((a, b) => a.labelY - b.labelY);
+    for (let i = 1; i < sorted.length; i++) {
+      const gap = sorted[i].labelY - sorted[i - 1].labelY;
+      if (sorted[i].clusterSize > 0 && sorted[i - 1].clusterSize > 0) {
+        expect(gap).toBeGreaterThanOrEqual(MIN_LABEL_GAP);
+      }
+    }
+  });
+
+  it("does not affect labels on different sides", () => {
+    const events = makeEvents([100, 100], [1, -1]); // same Y, opposite sides
+    const placements = assignTracks(events);
+
+    expect(placements[0].side).toBe("right");
+    expect(placements[1].side).toBe("left");
+    // Labels at same Y on different sides don't need de-collision
+    // Their labelY values can be close — they're on opposite sides
+  });
+
+  it("sets labelY for every placement", () => {
+    const events = makeEvents([50, 80, 120], [1, 1, -1]);
+    const placements = assignTracks(events);
+
+    for (const p of placements) {
+      expect(p.labelY).toBeTypeOf("number");
+    }
+  });
+
+  it("labelY reflects track stagger", () => {
+    // Two events at same Y on same side →
+    // different tracks with different labelY
+    const events = makeEvents([100, 100], [1, 1]);
+    const placements = assignTracks(events);
+
+    expect(placements[0].track).not.toBe(placements[1].track);
+    expect(placements[0].labelY).not.toBe(placements[1].labelY);
   });
 });
