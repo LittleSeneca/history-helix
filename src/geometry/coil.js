@@ -256,6 +256,13 @@ export function peopleStrands(people, tStart, tEnd, bandPx = BAND_PX) {
       rho,
       cohortPhase,
       era,
+      // Person metadata for picking + tooltip (B-4)
+      person: {
+        name: p.name,
+        birth: p.birth,
+        death: p.death,
+        sourceUrl: p.sourceUrl || `https://www.wikidata.org/wiki/${p.qid || ""}`,
+      },
     });
   }
 

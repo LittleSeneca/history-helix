@@ -2,6 +2,8 @@
 //
 // Loads data, initializes viewport + interaction, orchestrates rendering.
 // Canvas: population envelope → batched strands. SVG overlay: helix guides + event markers + labels.
+//
+// B-4: id-buffer strand picking with hover highlight and person tooltip.
 
 import { loadDemographics, loadPeople } from "./data/load.js";
 import { peopleStrands } from "./geometry/coil.js";
@@ -9,7 +11,16 @@ import { buildStrandBatches, renderScene } from "./render/strands.js";
 import { drawOverlay, onAnchorsRendered } from "./render/overlay.js";
 import { tMin, tMax } from "./geometry/helix.js";
 import * as viewport from "./interaction/viewport.js";
-import { initHover, setEventAnchors, showTooltipForEvent } from "./interaction/hover.js";
+import {
+  initHover,
+  setEventAnchors,
+  setStrands,
+  invalidatePicking,
+  rebuildPickingBuffer,
+  getHoveredIndex,
+  onHoverRenderRequest,
+  showTooltipForEvent,
+} from "./interaction/hover.js";
 import {
   toggleCategory,
   getCategories,
@@ -35,8 +46,10 @@ const BAND_PX = 8;
 // ── State ───────────────────────────────────────────────────
 
 let strandBatches = null;
+let strandData = [];   // full strand array for picking / highlight
 let eventData = [];
 let panel = null;
+let _pickingSettleTimer = null;
 
 // ── Viewport sizing ─────────────────────────────────────────
 
@@ -58,6 +71,10 @@ function resize() {
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
 
   viewport.resize(w, h);
+
+  // Picking buffer needs rebuild after resize
+  invalidatePicking();
+  _schedulePickingRebuild();
 }
 
 // ── Render ──────────────────────────────────────────────────
@@ -71,7 +88,11 @@ function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (strandBatches) {
-    renderScene(ctx, strandBatches, window.innerWidth, window.innerHeight);
+    const hoveredIdx = getHoveredIndex();
+    renderScene(ctx, strandBatches, window.innerWidth, window.innerHeight, {
+      hoveredIndex: hoveredIdx >= 0 ? hoveredIdx : undefined,
+      strands: strandData,
+    });
   }
   ctx.restore();
 
@@ -95,6 +116,15 @@ function render() {
       `[history-helix] frame: ${elapsed.toFixed(1)} ms, strands: ${window.__strandCount || 0}`,
     );
   }
+}
+
+// ── Picking buffer lifecycle ────────────────────────────────
+
+function _schedulePickingRebuild() {
+  clearTimeout(_pickingSettleTimer);
+  _pickingSettleTimer = setTimeout(() => {
+    rebuildPickingBuffer();
+  }, 300);
 }
 
 // ── Data loading ────────────────────────────────────────────
@@ -143,6 +173,9 @@ async function init() {
   // 2. Initialize viewport
   resize();
   viewport.onUpdate(() => {
+    // Invalidate picking buffer immediately; rebuild on settle
+    invalidatePicking();
+    _schedulePickingRebuild();
     render();
   });
 
@@ -150,6 +183,11 @@ async function init() {
   initHover(canvas, panel.tooltip);
   onAnchorsRendered((anchors) => {
     setEventAnchors(anchors);
+  });
+
+  // Hover state changes (strand highlight on/off) need re-render
+  onHoverRenderRequest(() => {
+    render();
   });
 
   // 4. Wire viewport to canvas events
@@ -175,11 +213,9 @@ async function init() {
     if ((e.key === "Enter" || e.key === " ") && e.target.tagName === "circle") {
       e.preventDefault();
       const eventId = e.target.getAttribute("data-event-id");
-      // Find the event and show tooltip at the circle's screen position
       const circle = e.target;
       const cx = parseFloat(circle.getAttribute("cx"));
       const cy = parseFloat(circle.getAttribute("cy"));
-      // Look up the full event record from anchor data
       const anchors = window.__lastAnchors || [];
       const match = anchors.find((a) => (a.event.id || "") === eventId);
       if (match) {
@@ -265,6 +301,7 @@ async function init() {
 
     // Generate strands from real people, filtered to [tMin, tMax]
     const { strands, filtered } = peopleStrands(people, tMin, tMax, BAND_PX);
+    strandData = strands;
     window.__strandCount = strands.length;
     window.__filteredOut = filtered;
 
@@ -277,6 +314,9 @@ async function init() {
     console.log(
       `[history-helix] batches: ${strandBatches.size} eras → ${strandBatches.size} stroke() calls`,
     );
+
+    // Pass strand data to hover system for picking
+    setStrands(strands);
   } catch (err) {
     console.error("[history-helix] people init failed:", err);
   }
@@ -286,6 +326,9 @@ async function init() {
 
   // Initial render
   render();
+
+  // Build picking buffer after first render (viewport is settled)
+  _schedulePickingRebuild();
 }
 
 // ── Event listeners ─────────────────────────────────────────
