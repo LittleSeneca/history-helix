@@ -4,11 +4,15 @@
 
 import { TRACK_GAP } from "../config.js";
 
+/** Vertical gap enforced between label text blocks on the same side. */
+export const MIN_LABEL_GAP = 14;
+
 /**
  * @typedef {Object} LabelPlacement
  * @property {number} track - which track this label sits on (0-indexed)
  * @property {'left'|'right'} side - left or right of the coil axis
  * @property {number} y - anchor Y position in scene space
+ * @property {number} labelY - de-collided Y position of the label text
  * @property {boolean} clustered - true if this label is part of a "+N more" cluster
  * @property {number} clusterSize - if clustered, how many events this represents
  */
@@ -91,6 +95,7 @@ export function assignTracks(events) {
         track,
         side,
         y,
+        labelY: y + track * 8, // vertical stagger per track
         clustered: false,
         clusterSize: 1,
       };
@@ -101,6 +106,7 @@ export function assignTracks(events) {
       track: MAX_TRACKS,
       side,
       y,
+      labelY: y,
       clustered: true,
       clusterSize: 1,
     };
@@ -120,11 +126,15 @@ export function assignTracks(events) {
   collapseClusters(placements, leftEvents, "left");
   collapseClusters(placements, rightEvents, "right");
 
+  // Third pass: vertical de-collision — ensure non-clustered labels
+  // on the same side don't overlap vertically.
+  decolideLabels(placements, events);
+
   // Return placements in original event order
   return events.map((_, i) => {
     const p = placements.get(i);
     if (!p) {
-      return { track: 0, side: "right", y: 0, clustered: true, clusterSize: 1 };
+      return { track: 0, side: "right", y: 0, labelY: 0, clustered: true, clusterSize: 1 };
     }
     return p;
   });
@@ -139,7 +149,7 @@ export function assignTracks(events) {
  * @param {EventWithPosition[]} events - side-sorted events
  * @param {'left'|'right'} side
  */
-function collapseClusters(placements, events, side) {
+export function collapseClusters(placements, events, side) {
   let runStart = null;
   let runCount = 0;
 
@@ -180,6 +190,41 @@ function collapseClusters(placements, events, side) {
       clustered: true,
       clusterSize: runCount,
     });
+  }
+}
+
+/**
+ * Vertical de-collision pass: ensures non-clustered labels on the same side
+ * maintain at least MIN_LABEL_GAP px between their labelY positions.
+ *
+ * Walks labels sorted by labelY; pushes each label down if it would overlap
+ * the previous label's block. Works in-place on the placements map.
+ *
+ * @param {Map<number, LabelPlacement>} placements
+ * @param {Object[]} events — full event array (indexed by original position)
+ */
+export function decolideLabels(placements, events) {
+  for (const side of ["left", "right"]) {
+    // Collect placements on this side, skipping absorbed labels
+    const items = [];
+    for (const [idx, p] of placements) {
+      if (p.side !== side) continue;
+      if (p.clusterSize === 0) continue; // absorbed into cluster
+      items.push({ idx, p });
+    }
+
+    // Sort by current labelY
+    items.sort((a, b) => a.p.labelY - b.p.labelY);
+
+    // Walk and push down overlapping labels
+    for (let i = 1; i < items.length; i++) {
+      const prev = items[i - 1].p;
+      const curr = items[i].p;
+      const minY = prev.labelY + MIN_LABEL_GAP;
+      if (curr.labelY < minY) {
+        curr.labelY = minY;
+      }
+    }
   }
 }
 

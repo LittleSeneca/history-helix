@@ -201,11 +201,11 @@ function drawEvents(g, events, hiddenCategories, anchorList) {
     // Emit anchor for hover
     anchorList.push({ event: e, sx: anchor.x, sy: anchor.y });
 
-    // Label position
+    // Label position — use de-collided Y from track assignment
     const labelXDir = pl.side === "left" ? -1 : 1;
     const trackOffset = LABEL_OFFSET_X + pl.track * 20;
     const labelX = anchor.x + labelXDir * trackOffset;
-    const labelY = anchor.y;
+    const labelY = pl.labelY != null ? toScreen(e.anchorX, pl.labelY).y : anchor.y;
 
     // Elbow point (midway in X, same Y as anchor)
     const elbowX = anchor.x + labelXDir * LABEL_OFFSET_X * 0.6;
