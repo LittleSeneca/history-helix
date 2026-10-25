@@ -170,6 +170,7 @@ async function init() {
   // 2. Initialize viewport
   resize();
   window.__getZoom = () => viewport.getZoom();
+  window.__getViewCenter = () => viewport.getViewCenter();
   viewport.onUpdate(() => {
     // Invalidate picking buffer immediately; rebuild on settle
     invalidatePicking();
