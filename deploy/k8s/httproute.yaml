@@ -6,6 +6,7 @@ metadata:
 spec:
   hostnames:
     - helix.brooks-security.com
+    - spiral.brooks-security.com
   parentRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway
