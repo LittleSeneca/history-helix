@@ -1,7 +1,9 @@
 // Geometry and render constants — single source of truth (DESIGN.md §2)
 
 export const TURNS = 6;
-export const R = 250;        // coil radius (scene px)
+export const R_BASE = 180;           // base coil radius (scene px) — ancient, sparse end
+export const DENSITY_GAIN = 170;     // R(u) ranges from R_BASE to R_BASE + DENSITY_GAIN
+export const SPREAD = 20;            // radial strand spread (was BAND_PX=8)
 export const LEAN_DEG = 32;
 export const SQUASH = 0.45;
 export const BUDGET = 60_000;
