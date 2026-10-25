@@ -7,6 +7,9 @@
 // <10 stroke calls as the target (§3.3).
 //
 // Uses the viewport module for pan/zoom transform.
+//
+// B-4: adds picking-buffer rendering (color-encoded strand indices),
+// single-strand highlight drawing, and hover highlight/dim support.
 
 import { project, tMin, tMax } from "../geometry/helix.js";
 import { strandPath } from "../geometry/coil.js";
@@ -155,8 +158,7 @@ export function buildStrandBatches(strands) {
 function _applyViewportTransform(ctx) {
   const dpr = window.devicePixelRatio || 1;
   const zoom = getZoom();
-  // toScreen returns CSS pixels. Canvas backing store is in device pixels (CSS × dpr).
-  const vp = toScreen(0, 0); // CSS-pixel position of scene origin on screen
+  const vp = toScreen(0, 0);
   ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, vp.x * dpr, vp.y * dpr);
 }
 
@@ -167,26 +169,103 @@ function _normalizedLineWidth() {
 /**
  * Draw all strand batches — one stroke() per era (7 calls total, ≤ 10 target).
  *
+ * Supports highlight mode: when hoveredIndex is set, all strands are dimmed
+ * and the hovered strand is drawn bright/thick on top.
+ *
  * @param {CanvasRenderingContext2D} ctx
  * @param {Map<string, Path2D>} batches
+ * @param {object} [opts]
+ * @param {number} [opts.hoveredIndex] - index of the hovered strand (if any)
+ * @param {object[]} [opts.strands] - strand data array (needed for highlight)
  */
-export function drawStrands(ctx, batches) {
+export function drawStrands(ctx, batches, opts = {}) {
+  const { hoveredIndex, strands } = opts;
+  const hasHighlight = hoveredIndex != null && strands != null;
+
   ctx.save();
   _applyViewportTransform(ctx);
 
   const lw = 0.8 / _normalizedLineWidth();
 
-  // Single pass: one stroke per era (7 calls — well under the ≤10 target)
+  // Dimmed pass: all strands at reduced alpha when highlighting
+  const alpha = hasHighlight ? 0.15 : 0.45;
+
+  const highlightEra = hasHighlight ? strands[hoveredIndex].era : null;
+
   for (const [era, path] of batches) {
     const color = colors[era] || "#888888";
     ctx.strokeStyle = color;
     ctx.lineWidth = lw;
-    ctx.globalAlpha = 0.45;
+    ctx.globalAlpha = alpha;
     ctx.stroke(path);
+  }
+
+  // Highlight pass: draw the single hovered strand bright and thick
+  if (hasHighlight) {
+    const s = strands[hoveredIndex];
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = lw * 2.5;
+
+    const p = strandPath(s.u0, s.u1, s.rho, s.cohortPhase);
+    ctx.stroke(p);
+
+    // Also draw a slightly wider glow
+    ctx.strokeStyle = colors[highlightEra] || "#ffffff";
+    ctx.lineWidth = lw * 1.5;
+    ctx.globalAlpha = 0.7;
+    ctx.stroke(p);
   }
 
   ctx.globalAlpha = 1;
   ctx.restore();
+}
+
+// ── Single strand drawing (for picking buffer) ──────────────
+
+/**
+ * Draw a single strand onto a context that already has the viewport
+ * transform applied. Used by the picking buffer.
+ *
+ * @param {CanvasRenderingContext2D} ctx - context WITH viewport transform applied
+ * @param {object} strand - {u0, u1, rho, cohortPhase}
+ * @param {object} style - {strokeStyle, lineWidth, globalAlpha}
+ */
+export function drawSingleStrand(ctx, strand, style = {}) {
+  const s = style;
+  if (s.strokeStyle) ctx.strokeStyle = s.strokeStyle;
+  if (s.lineWidth != null) ctx.lineWidth = s.lineWidth;
+  if (s.globalAlpha != null) ctx.globalAlpha = s.globalAlpha;
+
+  const p = strandPath(strand.u0, strand.u1, strand.rho, strand.cohortPhase);
+  ctx.stroke(p);
+}
+
+// ── Picking buffer rendering (B-4) ──────────────────────────
+
+/**
+ * Draw all strands onto a context using color-encoded indices.
+ * Each strand is drawn as a thin line in the color r,g,b = index as 24-bit.
+ * The caller must set up the viewport transform on the context first.
+ *
+ * @param {CanvasRenderingContext2D} ctx - context WITH viewport transform applied
+ * @param {object[]} strands - full strand data array
+ */
+export function drawStrandsToPickingBuffer(ctx, strands) {
+  // Draw each strand individually in its index-encoded color
+  // Use 1px lines so there's minimal aliasing into neighbor colors
+  for (let i = 0; i < strands.length; i++) {
+    const s = strands[i];
+    const r = (i >> 16) & 0xff;
+    const g = (i >> 8) & 0xff;
+    const b = i & 0xff;
+
+    ctx.strokeStyle = `rgb(${r},${g},${b})`;
+    ctx.lineWidth = 1.5; // slightly thicker than display for reliable picking
+
+    const p = strandPath(s.u0, s.u1, s.rho, s.cohortPhase);
+    ctx.stroke(p);
+  }
 }
 
 // ── Full render orchestration ───────────────────────────────
@@ -198,12 +277,13 @@ export function drawStrands(ctx, batches) {
  * @param {Map<string, Path2D>} batches
  * @param {number} vw - viewport CSS width
  * @param {number} vh - viewport CSS height
+ * @param {object} [opts] - passed through to drawStrands
  */
-export function renderScene(ctx, batches, vw, vh) {
+export function renderScene(ctx, batches, vw, vh, opts) {
   ctx.clearRect(0, 0, vw, vh);
   drawPopulationEnvelope(ctx);
   drawSpine(ctx);
   if (batches && batches.size > 0) {
-    drawStrands(ctx, batches);
+    drawStrands(ctx, batches, opts);
   }
 }
