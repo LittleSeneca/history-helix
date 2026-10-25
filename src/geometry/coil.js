@@ -3,13 +3,12 @@
 //
 // No DOM. No canvas drawing. Pure geometry + data allocation.
 
-import { u as toU, pointOnSurface, R, tMin, tMax } from "./helix.js";
-import { BUDGET, colors } from "../config.js";
+import { u as toU, pointOnSurface, R, R_BASE, tMin, tMax } from "./helix.js";
+import { BUDGET, colors, SPREAD } from "../config.js";
 
 const FLOOR = 1;
 const COHORT_WIDTH = 25;
 const STRAND_SAMPLES = 12;
-const BAND_PX = 8;
 
 // ── Era → color-key mapping ─────────────────────────────────
 
@@ -48,16 +47,15 @@ export function getEra(year) {
  * @returns {{x:number, y:number}[]} array of points
  */
 export function strandPoints(u0, u1, rho, phase, samples = STRAND_SAMPLES) {
-  const radius = R + rho;
   const points = [];
 
   // Start point
-  points.push(pointOnSurface(u0, radius, phase));
+  points.push(pointOnSurface(u0, R(u0) + rho, phase));
 
   // Intermediate points
   for (let i = 1; i <= samples; i++) {
     const u = u0 + (u1 - u0) * (i / samples);
-    points.push(pointOnSurface(u, radius, phase));
+    points.push(pointOnSurface(u, R(u) + rho, phase));
   }
 
   return points;
@@ -164,7 +162,7 @@ export function allocCohorts(
  * @param {number} [bandPx=8]     - radial band width in px
  * @returns {object[]}
  */
-export function generateStrands(cohorts, lifeExpFn, bandPx = BAND_PX) {
+export function generateStrands(cohorts, lifeExpFn, bandPx = SPREAD) {
   const strands = [];
 
   for (const cohort of cohorts) {
@@ -226,7 +224,7 @@ export function generateStrands(cohorts, lifeExpFn, bandPx = BAND_PX) {
  * @param {number} [bandPx=8]    - radial band width in px
  * @returns {{strands: object[], filtered: number}}
  */
-export function peopleStrands(people, tStart, tEnd, bandPx = BAND_PX) {
+export function peopleStrands(people, tStart, tEnd, bandPx = SPREAD) {
   const strands = [];
   let filtered = 0;
 

@@ -8,6 +8,7 @@ import {
   project,
   pointOnSurface,
   R,
+  R_BASE,
 } from "../src/geometry/helix.js";
 import { TURNS } from "../src/config.js";
 
@@ -171,7 +172,7 @@ describe("strandPoints(u0, u1, rho, phase)", () => {
     const rho = 7;
     const phase = 0.08;
     const pts = strandPoints(u0, u1, rho, phase, 12);
-    const expected = pointOnSurface(u0, R + rho, phase);
+    const expected = pointOnSurface(u0, R(u0) + rho, phase);
     expect(pts[0].x).toBeCloseTo(expected.x, 10);
     expect(pts[0].y).toBeCloseTo(expected.y, 10);
   });
@@ -182,16 +183,16 @@ describe("strandPoints(u0, u1, rho, phase)", () => {
     const rho = 7;
     const phase = 0.08;
     const pts = strandPoints(u0, u1, rho, phase, 12);
-    const expected = pointOnSurface(u1, R + rho, phase);
+    const expected = pointOnSurface(u1, R(u1) + rho, phase);
     const last = pts[pts.length - 1];
     expect(last.x).toBeCloseTo(expected.x, 10);
     expect(last.y).toBeCloseTo(expected.y, 10);
   });
 
-  it("at rho=0, phase=0, strandPoints(u, u, 0, 0) gives pointOnSurface(u, R, 0)", () => {
+  it("at rho=0, phase=0, strandPoints(u, u, 0, 0) gives pointOnSurface(u, R(u), 0)", () => {
     const u = 0.4;
     const pts = strandPoints(u, u, 0, 0, 6);
-    const expected = pointOnSurface(u, R, 0);
+    const expected = pointOnSurface(u, R(u), 0);
     // When u0 === u1, all points should be the same
     for (const p of pts) {
       expect(p.x).toBeCloseTo(expected.x, 10);
@@ -199,9 +200,9 @@ describe("strandPoints(u0, u1, rho, phase)", () => {
     }
   });
 
-  it("pointOnSurface(u, R, 0) equals project(u)", () => {
+  it("pointOnSurface(u, R(u), 0) equals project(u)", () => {
     const u = 0.3;
-    const p1 = pointOnSurface(u, R, 0);
+    const p1 = pointOnSurface(u, R(u), 0);
     const p2 = project(u);
     expect(p1.x).toBeCloseTo(p2.x, 10);
     expect(p1.y).toBeCloseTo(p2.y, 10);
