@@ -1,14 +1,15 @@
-// Hover hit-testing — strand bands and event markers, tooltip driver
-// (DESIGN.md §5.2)
+// Hover hit-testing — strand picking (id-buffer), event markers, tooltip driver
+// (DESIGN.md §5.2, B-4)
 //
-// Approach:
-// - Strands: geometric proximity to the helix spine → cohort year → sample strand info
-// - Events: spatial index of screen-space anchor positions, nearest-neighbor lookup
-//
-// Verifiable via dispatched PointerEvents + read-back (not screenshots).
+// Picking strategy (B-4):
+// - Offscreen canvas the size of the display canvas in device pixels.
+// - Every strand drawn in a colour encoding its array index (r,g,b = 24-bit).
+// - On pointermove: getImageData(x, y, 1, 1) → decode index → look up person.
+// - Buffer rebuilt only on viewport change — never per mouse move.
+// - Event markers: existing spatial index (nearest-neighbor).
 
-import { toScene } from "./viewport.js";
-import { u as toU, project, tMin, tMax } from "../geometry/helix.js";
+import { toScene, getZoom, toScreen } from "./viewport.js";
+import { drawStrandsToPickingBuffer } from "../render/strands.js";
 
 // ── State ───────────────────────────────────────────────────
 
@@ -19,12 +20,15 @@ let _tooltipEl = null;
 let _eventAnchors = [];
 
 /** @type {object[]} */
-let _cohorts = [];
+let _strands = [];
 
 let _canvas = null;
+let _pickingCanvas = null;
+let _pickingCtx = null;
 let _hoveredEvent = null;
-let _hoveredStrand = null;
+let _hoveredStrandIndex = -1;
 let _onHighlight = null;
+let _pickingDirty = true;
 
 const HIT_RADIUS = 20; // screen pixels for event marker hit-testing
 
@@ -39,8 +43,40 @@ export function initHover(canvas, tooltipEl) {
   _canvas = canvas;
   _tooltipEl = tooltipEl;
 
-  canvas.addEventListener("pointermove", _onPointerMove);
+  // Listen on document for pointermove — SVG circles have pointer-events: auto
+  // for keyboard accessibility, so they capture events before the canvas.
+  document.addEventListener("pointermove", _onPointerMove);
   canvas.addEventListener("pointerleave", _onPointerLeave);
+
+  // Create offscreen picking buffer
+  _createPickingBuffer();
+}
+
+/**
+ * Set the strand data array for picking. Call after strand generation.
+ * Each strand should have a .person property for the tooltip.
+ * @param {object[]} strands
+ */
+export function setStrands(strands) {
+  _strands = strands;
+  _pickingDirty = true;
+}
+
+/**
+ * Mark the picking buffer as needing a rebuild (call after viewport change).
+ */
+export function invalidatePicking() {
+  _pickingDirty = true;
+  // Clear highlight on viewport change
+  _clearStrandHover();
+}
+
+/**
+ * Get the currently hovered strand index, or -1 if none.
+ * @returns {number}
+ */
+export function getHoveredIndex() {
+  return _hoveredStrandIndex;
 }
 
 /**
@@ -52,20 +88,81 @@ export function setEventAnchors(anchors) {
 }
 
 /**
- * Update the cohort data for strand hover. Call after strand generation.
- * @param {object[]} cohorts
- */
-export function setCohorts(cohorts) {
-  _cohorts = cohorts;
-}
-
-/**
  * Register a callback for highlighting (e.g., pulse an event marker).
  * Called with null to clear or {event} to highlight.
  * @param {function} cb
  */
 export function onHighlight(cb) {
   _onHighlight = cb;
+}
+
+// ── Picking buffer ──────────────────────────────────────────
+
+function _createPickingBuffer() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = _canvas.width;
+  const h = _canvas.height;
+
+  _pickingCanvas = document.createElement("canvas");
+  _pickingCanvas.width = w;
+  _pickingCanvas.height = h;
+  _pickingCtx = _pickingCanvas.getContext("2d", { willReadFrequently: true });
+}
+
+/**
+ * Ensure the picking buffer matches the display canvas size.
+ */
+function _resizePickingBuffer() {
+  const w = _canvas.width;
+  const h = _canvas.height;
+  if (_pickingCanvas.width !== w || _pickingCanvas.height !== h) {
+    _pickingCanvas.width = w;
+    _pickingCanvas.height = h;
+    _pickingDirty = true;
+  }
+}
+
+/**
+ * Rebuild the picking buffer by drawing all strands in color-encoded indices.
+ * Call after viewport settle. Measures rebuild time.
+ */
+export function rebuildPickingBuffer() {
+  if (!_pickingCtx || _strands.length === 0) return;
+
+  _resizePickingBuffer();
+
+  if (!_pickingDirty) return;
+
+  const t0 = performance.now();
+
+  const ctx = _pickingCtx;
+  const dpr = window.devicePixelRatio || 1;
+
+  // Clear
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, _pickingCanvas.width, _pickingCanvas.height);
+
+  // Apply the same viewport transform as the display canvas
+  const zoom = getZoom();
+  const vp = toScreen(0, 0);
+  ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, vp.x * dpr, vp.y * dpr);
+
+  // Draw all strands in picking colors
+  drawStrandsToPickingBuffer(ctx, _strands);
+
+  const elapsed = performance.now() - t0;
+  console.log(
+    `[history-helix] picking buffer rebuilt: ${elapsed.toFixed(1)} ms, ${_strands.length} strands`,
+  );
+
+  _pickingDirty = false;
+
+  // Store rebuild time for reporting
+  window.__pickingRebuildMs = elapsed;
+  window.__pickingReady = true;
+
+  // Expose picking buffer for tests (so they can find strand positions)
+  window.__pickingCanvas = _pickingCanvas;
 }
 
 // ── Hit-testing ─────────────────────────────────────────────
@@ -94,73 +191,41 @@ export function hitTestEvent(px, py) {
 }
 
 /**
- * Hit-test strand bands. Returns representative strand info for the
- * cohort nearest to the screen point, or null if too far from the coil.
- * @param {number} px - screen x
- * @param {number} py - screen y
- * @returns {object|null} {birthYear, deathYear, cohortLabel, era}
+ * Pick the strand at the given screen coordinates using the id-buffer.
+ * Returns the strand object (with .person) or null if no strand is under the cursor.
+ * @param {number} px - screen x (CSS pixels)
+ * @param {number} py - screen y (CSS pixels)
+ * @returns {object|null} the strand object or null
  */
-export function hitTestStrand(px, py) {
-  if (_cohorts.length === 0) return null;
+export function pickStrand(px, py) {
+  if (!_pickingCtx || _strands.length === 0) return null;
+  if (_pickingDirty) return null; // stale buffer, don't pick
 
-  const scene = toScene(px, py);
+  const dpr = window.devicePixelRatio || 1;
+  const bx = Math.round(px * dpr);
+  const by = Math.round(py * dpr);
 
-  // Find the closest point on the helix spine (sample at 200 points)
-  let bestU = 0;
-  let bestDist = Infinity;
-  const N = 200;
-
-  for (let i = 0; i <= N; i++) {
-    const up = i / N;
-    const p = project(up);
-    const dx = p.x - scene.x;
-    const dy = p.y - scene.y;
-    const dist = dx * dx + dy * dy;
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestU = up;
-    }
+  // Bounds check
+  if (bx < 0 || by < 0 || bx >= _pickingCanvas.width || by >= _pickingCanvas.height) {
+    return null;
   }
 
-  // Require proximity to the coil: within ~60 scene units
-  if (bestDist > 3600) return null;  // 60^2
+  const pixel = _pickingCtx.getImageData(bx, by, 1, 1).data;
+  const r = pixel[0];
+  const g = pixel[1];
+  const b = pixel[2];
+  const a = pixel[3];
 
-  // Map u → year
-  const year = tMin + bestU * (tMax - tMin);
+  // Transparent = no strand hit
+  if (a === 0) return null;
 
-  // Find the cohort this year falls into
-  for (const c of _cohorts) {
-    if (year >= c.start && year < c.end) {
-      const cohortLabel = `${Math.floor(c.midpoint / 10) * 10}s`;
-      return {
-        birthYear: Math.round(year),
-        deathYear: Math.round(year + _cohortLifeExp(c, year)),
-        cohortLabel,
-        era: _cohortEra(c),
-      };
-    }
+  const index = (r << 16) | (g << 8) | b;
+
+  if (index >= 0 && index < _strands.length) {
+    return _strands[index];
   }
 
   return null;
-}
-
-function _cohortLifeExp(cohort, year) {
-  // Use the cohort's life expectancy if available, else estimate 35
-  if (cohort.lifeExp) return cohort.lifeExp;
-  return 35;
-}
-
-function _cohortEra(cohort) {
-  if (cohort.era) return cohort.era;
-  // Infer from midpoint
-  const y = cohort.midpoint;
-  if (y < -3000) return "prehistory";
-  if (y < 500) return "ancient";
-  if (y < 1500) return "classical";
-  if (y < 1800) return "earlyModern";
-  if (y < 1950) return "industrial";
-  if (y < 2020) return "modern";
-  return "future";
 }
 
 // ── Tooltip display ─────────────────────────────────────────
@@ -176,8 +241,20 @@ function _buildTooltipHTML(info) {
     return `<strong>${info.title}</strong><br><small>${yearLabel} · ${cat}</small><br><a href="${url}" target="_blank" rel="noopener">wikidata</a>`;
   }
 
+  // Person tooltip (B-4)
+  if (info.name !== undefined) {
+    const bLabel = info.birth < 0 ? `${Math.abs(info.birth)} BCE` : `${info.birth} CE`;
+    const dLabel = info.death < 0 ? `${Math.abs(info.death)} BCE` : `${info.death} CE`;
+    const url = info.sourceUrl || "";
+    let html = `<strong>${info.name}</strong><br><small>${bLabel} – ${dLabel}</small>`;
+    if (url) {
+      html += `<br><a href="${url}" target="_blank" rel="noopener">wikidata</a>`;
+    }
+    return html;
+  }
+
+  // Legacy strand tooltip (synthetic)
   if (info.birthYear !== undefined) {
-    // Strand tooltip
     const bLabel = info.birthYear < 0 ? `${Math.abs(info.birthYear)} BCE` : `${info.birthYear} CE`;
     const dLabel = info.deathYear < 0 ? `${Math.abs(info.deathYear)} BCE` : `${info.deathYear} CE`;
     return `a life: b ${bLabel} – d ${dLabel}, cohort ${info.cohortLabel}`;
@@ -249,37 +326,62 @@ function _onPointerMove(e) {
   if (event) {
     if (_hoveredEvent !== event) {
       _hoveredEvent = event;
-      _hoveredStrand = null;
+      _clearStrandHover();
       _showTooltip(event, px, py);
       if (_onHighlight) _onHighlight({ event });
     }
     return;
   }
 
-  // Check strands
-  const strand = hitTestStrand(px, py);
-  if (strand) {
-    if (_hoveredStrand !== strand) {
-      _hoveredStrand = strand;
+  // Check strands via picking buffer
+  const strand = pickStrand(px, py);
+  if (strand && strand.person) {
+    const idx = _strands.indexOf(strand);
+    if (idx !== _hoveredStrandIndex) {
+      _hoveredStrandIndex = idx;
       _hoveredEvent = null;
-      _showTooltip(strand, px, py);
+      _showTooltip(strand.person, px, py);
       if (_onHighlight) _onHighlight(null);
+      // Trigger render for highlight
+      _requestRender();
     }
     return;
   }
 
   // Nothing hit
-  if (_hoveredEvent || _hoveredStrand) {
+  if (_hoveredEvent || _hoveredStrandIndex >= 0) {
     _hoveredEvent = null;
-    _hoveredStrand = null;
+    _clearStrandHover();
     _hideTooltip();
     if (_onHighlight) _onHighlight(null);
+    _requestRender();
   }
 }
 
 function _onPointerLeave() {
   _hoveredEvent = null;
-  _hoveredStrand = null;
+  _clearStrandHover();
   _hideTooltip();
   if (_onHighlight) _onHighlight(null);
+  _requestRender();
+}
+
+function _clearStrandHover() {
+  _hoveredStrandIndex = -1;
+}
+
+// ── Render trigger ──────────────────────────────────────────
+
+let _renderCallback = null;
+
+/**
+ * Register a callback to request a re-render when hover state changes.
+ * @param {function} cb
+ */
+export function onHoverRenderRequest(cb) {
+  _renderCallback = cb;
+}
+
+function _requestRender() {
+  if (_renderCallback) _renderCallback();
 }
