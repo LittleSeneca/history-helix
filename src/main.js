@@ -1,19 +1,17 @@
 // History Helix — main bootstrap
 //
 // Loads data, initializes viewport + interaction, orchestrates rendering.
-// Canvas: batched strands. SVG overlay: helix guides + event markers + labels.
+// Canvas: population envelope → batched strands. SVG overlay: helix guides + event markers + labels.
 
-import { loadDemographics, pop, lifeExp } from "./data/load.js";
-import { allocCohorts, generateStrands } from "./geometry/coil.js";
+import { loadDemographics, loadPeople } from "./data/load.js";
+import { peopleStrands } from "./geometry/coil.js";
 import { buildStrandBatches, renderScene } from "./render/strands.js";
 import { drawOverlay, onAnchorsRendered } from "./render/overlay.js";
 import { tMin, tMax } from "./geometry/helix.js";
-import { BUDGET } from "./config.js";
 import * as viewport from "./interaction/viewport.js";
-import { initHover, setEventAnchors, setCohorts, showTooltipForEvent } from "./interaction/hover.js";
+import { initHover, setEventAnchors, showTooltipForEvent } from "./interaction/hover.js";
 import {
   toggleCategory,
-  isCategoryVisible,
   getCategories,
   getHiddenCategories,
   getCurrentEra,
@@ -32,15 +30,12 @@ const ctx = canvas.getContext("2d");
 
 // ── Constants ───────────────────────────────────────────────
 
-const FLOOR = 1;
-const COHORT_WIDTH = 25;
 const BAND_PX = 8;
 
 // ── State ───────────────────────────────────────────────────
 
 let strandBatches = null;
 let eventData = [];
-let allCohorts = [];
 let panel = null;
 
 // ── Viewport sizing ─────────────────────────────────────────
@@ -70,7 +65,7 @@ function resize() {
 function render() {
   const t0 = performance.now();
 
-  // Canvas: clear the full backing store, then draw strands
+  // Canvas: clear the full backing store, then draw
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -112,8 +107,16 @@ async function loadEvents() {
       return;
     }
     const data = await resp.json();
-    eventData = data.events || [];
-    console.log(`Loaded ${eventData.length} events`);
+    const rawEvents = data.events || [];
+
+    // Filter events to the configured timeline span
+    eventData = rawEvents.filter(
+      (e) => e.year >= tMin && e.year <= tMax,
+    );
+    const filteredOut = rawEvents.length - eventData.length;
+    console.log(
+      `Loaded ${eventData.length} events (${filteredOut} outside [${tMin}, ${tMax}] filtered out)`,
+    );
 
     // Populate search index and filter rail
     setSearchEvents(eventData);
@@ -246,36 +249,36 @@ async function init() {
     }
   });
 
-  // 8. Load data (events first, they're fast, then demographics)
+  // 8. Load data — people + demographics + events in parallel
   const eventsPromise = loadEvents();
 
+  // Load demographics first (needed for population envelope)
+  console.log("[history-helix] loading demographics…");
+  await loadDemographics();
+  console.log("[history-helix] demographics loaded — pop envelope ready");
+
+  // Load real people
   try {
-    console.log("[history-helix] loading demographics…");
-    await loadDemographics();
-    console.log("[history-helix] demographics loaded");
+    console.log("[history-helix] loading people…");
+    const people = await loadPeople();
+    console.log(`[history-helix] people loaded: ${people.length} records`);
 
-    // Allocate cohorts
-    allCohorts = allocCohorts(pop, BUDGET, FLOOR, tMin, tMax, COHORT_WIDTH);
-    const totalAlloc = allCohorts.reduce((s, c) => s + c.count, 0);
-    console.log(
-      `[history-helix] cohorts: ${allCohorts.length}, Σalloc = ${totalAlloc}`,
-    );
-
-    // Generate strands
-    const strands = generateStrands(allCohorts, lifeExp, BAND_PX);
+    // Generate strands from real people, filtered to [tMin, tMax]
+    const { strands, filtered } = peopleStrands(people, tMin, tMax, BAND_PX);
     window.__strandCount = strands.length;
-    console.log(`[history-helix] strands generated: ${strands.length}`);
+    window.__filteredOut = filtered;
+
+    console.log(
+      `[history-helix] people strands: ${strands.length}, filtered out: ${filtered}`,
+    );
 
     // Build batched Path2Ds
     strandBatches = buildStrandBatches(strands);
     console.log(
       `[history-helix] batches: ${strandBatches.size} eras → ${strandBatches.size} stroke() calls`,
     );
-
-    // Pass cohort data to hover system for strand hit-testing
-    setCohorts(allCohorts);
   } catch (err) {
-    console.error("[history-helix] demographics init failed:", err);
+    console.error("[history-helix] people init failed:", err);
   }
 
   // Ensure events are loaded

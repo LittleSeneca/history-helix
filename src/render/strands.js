@@ -8,12 +8,14 @@
 //
 // Uses the viewport module for pan/zoom transform.
 
-import { project } from "../geometry/helix.js";
+import { project, tMin, tMax } from "../geometry/helix.js";
 import { strandPath } from "../geometry/coil.js";
 import { colors } from "../config.js";
 import { toScreen, getZoom } from "../interaction/viewport.js";
+import { pop } from "../data/load.js";
 
 const SPINE_SAMPLES = 2000;
+const ENVELOPE_SAMPLES = 500;
 
 // ── Spine guide (faint) ─────────────────────────────────────
 
@@ -36,6 +38,85 @@ export function drawSpine(ctx) {
   ctx.strokeStyle = "rgba(90,125,154,0.15)";
   ctx.lineWidth = 0.8 / _normalizedLineWidth();
   ctx.stroke();
+  ctx.restore();
+}
+
+// ── Population envelope (B-3) ────────────────────────────────
+
+/**
+ * Draw a faint background "population envelope" along the coil —
+ * a soft band whose width traces the population curve.
+ *
+ * Uses a filled ribbon: for each sample point along the coil,
+ * offset perpendicular by an amount proportional to log(pop).
+ * Low alpha so it reads as context, not as data.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ */
+export function drawPopulationEnvelope(ctx) {
+  ctx.save();
+  _applyViewportTransform(ctx);
+
+  const samples = ENVELOPE_SAMPLES;
+
+  // Collect population values to compute log range
+  const pops = [];
+  for (let i = 0; i <= samples; i++) {
+    const up = i / samples;
+    const year = tMin + up * (tMax - tMin);
+    pops.push(Math.max(1, pop(year)));
+  }
+
+  const logMin = Math.log10(Math.min(...pops));
+  const logMax = Math.log10(Math.max(...pops));
+  const logRange = logMax - logMin || 1;
+
+  // Build upper and lower envelope paths
+  const upper = [];
+  const lower = [];
+
+  for (let i = 0; i <= samples; i++) {
+    const up = i / samples;
+    const pt = project(up);
+    const logPop = Math.log10(pops[i]);
+    const frac = (logPop - logMin) / logRange;
+
+    // Band width: 2px to 35px (scene space), mapped from population fraction
+    const halfWidth = 2 + frac * 16;
+
+    // Compute perpendicular direction numerically
+    const eps = 0.0005;
+    const ptAhead = project(Math.min(1, up + eps));
+    const ptBehind = project(Math.max(0, up - eps));
+    const dx = ptAhead.x - ptBehind.x;
+    const dy = ptAhead.y - ptBehind.y;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+
+    upper.push({ x: pt.x + nx * halfWidth, y: pt.y + ny * halfWidth });
+    lower.push({ x: pt.x - nx * halfWidth, y: pt.y - ny * halfWidth });
+  }
+
+  // Build filled path: upper envelope forward, lower envelope backward
+  ctx.beginPath();
+  ctx.moveTo(upper[0].x, upper[0].y);
+  for (let i = 1; i < upper.length; i++) {
+    ctx.lineTo(upper[i].x, upper[i].y);
+  }
+  for (let i = lower.length - 1; i >= 0; i--) {
+    ctx.lineTo(lower[i].x, lower[i].y);
+  }
+  ctx.closePath();
+
+  ctx.fillStyle = "rgba(90,125,154,0.06)";
+  ctx.fill();
+
+  // Subtle outline along the envelope edges
+  ctx.strokeStyle = "rgba(90,125,154,0.12)";
+  ctx.lineWidth = 0.5 / _normalizedLineWidth();
+  ctx.stroke();
+
   ctx.restore();
 }
 
@@ -111,15 +192,16 @@ export function drawStrands(ctx, batches) {
 // ── Full render orchestration ───────────────────────────────
 
 /**
- * Render the full canvas scene: faint spine + batched strands.
+ * Render the full canvas scene: population envelope → faint spine → batched strands.
  *
  * @param {CanvasRenderingContext2D} ctx
  * @param {Map<string, Path2D>} batches
- * @param {number} vw - viewport CSS width (unused — viewport handles sizing)
- * @param {number} vh - viewport CSS height (unused — viewport handles sizing)
+ * @param {number} vw - viewport CSS width
+ * @param {number} vh - viewport CSS height
  */
 export function renderScene(ctx, batches, vw, vh) {
   ctx.clearRect(0, 0, vw, vh);
+  drawPopulationEnvelope(ctx);
   drawSpine(ctx);
   if (batches && batches.size > 0) {
     drawStrands(ctx, batches);

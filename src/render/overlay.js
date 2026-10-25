@@ -103,9 +103,7 @@ function drawHelixGuide(g) {
  */
 function drawEraMarkers(g) {
   const eras = [
-    { year: -10000, label: "10,000 BCE" },
-    { year: -5000, label: "5,000 BCE" },
-    { year: -3000, label: "3,000 BCE" },
+    { year: -2000, label: "2,000 BCE" },
     { year: -1000, label: "1,000 BCE" },
     { year: -500, label: "500 BCE" },
     { year: 1, label: "1 CE" },
@@ -116,7 +114,7 @@ function drawEraMarkers(g) {
     { year: 1900, label: "1900 CE" },
     { year: 1950, label: "1950 CE" },
     { year: 2000, label: "2000 CE" },
-    { year: 2100, label: "2100 CE" },
+    { year: 2026, label: "2026 CE" },
   ];
 
   for (const era of eras) {

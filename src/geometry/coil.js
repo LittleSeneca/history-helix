@@ -212,3 +212,65 @@ export function generateStrands(cohorts, lifeExpFn, bandPx = BAND_PX) {
 
   return strands;
 }
+
+// ── Real-people strand generation (B-3) ─────────────────────
+
+/**
+ * Generate strand descriptors from real people data.
+ *
+ * Each strand: { u0, u1, rho, cohortPhase, era }
+ *
+ * @param {object[]} people      - array of {birth, death, name, ...}
+ * @param {number} tStart         - timeline start year
+ * @param {number} tEnd           - timeline end year
+ * @param {number} [bandPx=8]    - radial band width in px
+ * @returns {{strands: object[], filtered: number}}
+ */
+export function peopleStrands(people, tStart, tEnd, bandPx = BAND_PX) {
+  const strands = [];
+  let filtered = 0;
+
+  for (const p of people) {
+    // Defensive filter: skip people outside the timeline span
+    if (p.death < tStart || p.birth > tEnd) {
+      filtered++;
+      continue;
+    }
+
+    const u0 = (p.birth - tStart) / (tEnd - tStart);
+    const u1 = (p.death - tStart) / (tEnd - tStart);
+
+    // Clamp to [0, 1]
+    const u0c = Math.max(0, Math.min(1, u0));
+    const u1c = Math.max(u0c, Math.min(1, u1));
+
+    // Per-strand visual jitter (deterministic-ish from id hash for stability)
+    const idHash = hashCode(p.id || p.name || "");
+    const rho = ((idHash % 1000) / 1000 - 0.5) * 2 * bandPx;
+    const cohortPhase = ((idHash % 200) / 200 - 0.5) * 0.1;
+    const era = getEra(p.birth);
+
+    strands.push({
+      u0: u0c,
+      u1: u1c,
+      rho,
+      cohortPhase,
+      era,
+    });
+  }
+
+  return { strands, filtered };
+}
+
+/**
+ * Simple string hash for deterministic strand jitter.
+ * @param {string} str
+ * @returns {number}
+ */
+function hashCode(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}

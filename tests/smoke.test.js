@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TURNS, LEAN_DEG, SQUASH, R, BUDGET, colors } from "../src/config.js";
+import { TURNS, LEAN_DEG, SQUASH, R, BUDGET, colors, tMin, tMax } from "../src/config.js";
 
 describe("config", () => {
   it("exports TURNS = 6", () => {
@@ -20,6 +20,14 @@ describe("config", () => {
 
   it("exports BUDGET = 60_000", () => {
     expect(BUDGET).toBe(60_000);
+  });
+
+  it("exports tMin = -2000", () => {
+    expect(tMin).toBe(-2000);
+  });
+
+  it("exports tMax = 2026", () => {
+    expect(tMax).toBe(2026);
   });
 
   it("exports a non-empty colors map", () => {
