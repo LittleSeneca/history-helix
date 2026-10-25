@@ -42,8 +42,8 @@ USER_AGENT = (
     "shiloh@brooks-security.com) Wikidata people pipeline"
 )
 SITELINK_MIN = int(os.environ.get("HISTORY_HELIX_PEOPLE_SITELINK_MIN", "25"))
-YEAR_MIN = -10000
-YEAR_MAX = 2100
+YEAR_MIN = -2000
+YEAR_MAX = 2026
 CHUNK_DELAY = 1.5          # seconds between queries (be polite to WDQS)
 CHUNK_SIZE_YEARS = 10       # birth-decade chunks
 QUERY_LIMIT = 5000          # WDQS response cap per query
