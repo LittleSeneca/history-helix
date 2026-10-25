@@ -127,7 +127,7 @@ All values are life expectancy at birth.
 **License:** CC0 1.0 Universal (public domain dedication)
 **Query scope:** All Wikidata items that are instances of human (Q5) with
 both a recorded date of birth (P569) and date of death (P570), filtered to
-25+ Wikipedia sitelinks.  Birth years span 10,000 BCE to 2100 CE.
+25+ Wikipedia sitelinks.  Birth years span 2000 BCE to 2026 CE.
 
 ### Known Biases
 
