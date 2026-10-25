@@ -6,7 +6,7 @@
 
 import { project, u, depth, tMin, tMax } from "../geometry/helix.js";
 import { TURNS, TRACK_GAP, LABEL_OFFSET_X, colors, LOD_SITELINK_THRESHOLDS } from "../config.js";
-import { assignTracks, maxTrack } from "./labels.js";
+import { assignTracks, maxTrack, decolideAllLabels } from "./labels.js";
 import { toScreen, getLODThreshold } from "../interaction/viewport.js";
 
 const SPINE_SAMPLES = 2000;
@@ -34,11 +34,59 @@ export function onAnchorsRendered(cb) {
   _onAnchorsRendered = cb;
 }
 
+// ── Era marker definitions ──────────────────────────────────
+
+const ERA_MARKERS = [
+  { year: -2000, label: "2,000 BCE" },
+  { year: -1000, label: "1,000 BCE" },
+  { year: -500, label: "500 BCE" },
+  { year: 1, label: "1 CE" },
+  { year: 500, label: "500 CE" },
+  { year: 1000, label: "1000 CE" },
+  { year: 1500, label: "1500 CE" },
+  { year: 1800, label: "1800 CE" },
+  { year: 1900, label: "1900 CE" },
+  { year: 1950, label: "1950 CE" },
+  { year: 2000, label: "2000 CE" },
+  { year: 2026, label: "2026 CE" },
+];
+
+/**
+ * Compute screen-space positions for all era/millennium tick labels.
+ * Filters out markers outside the visible timeline range.
+ * @returns {Array<{year: number, label: string, anchorX: number, anchorY: number, labelScreenX: number, labelScreenY: number}>}
+ */
+function computeEraScreenPositions() {
+  const results = [];
+  for (const era of ERA_MARKERS) {
+    const up = u(era.year);
+    if (up < 0 || up > 1) continue;
+    const p = project(up);
+    const s = toScreen(p.x, p.y);
+    results.push({
+      year: era.year,
+      label: era.label,
+      anchorX: s.x,
+      anchorY: s.y,
+      labelScreenX: s.x + 8,
+      labelScreenY: s.y + 4,
+    });
+  }
+  return results;
+}
+
+// ── Main draw entry point ───────────────────────────────────
+
 /**
  * Draw the full SVG overlay on the given SVG element.
+ *
+ * Phase 1: compute all label positions in screen space (events + era ticks).
+ * Phase 2: run unified screen-space de-collision across ALL labels.
+ * Phase 3: draw era markers, then events — both using adjusted positions.
+ *
  * @param {SVGSVGElement} svg
- * @param {number} vw - viewport width
- * @param {number} vh - viewport height
+ * @param {number} vw - viewport width (screen pixels)
+ * @param {number} vh - viewport height (screen pixels)
  * @param {Object[]} events - normalized event records from events.json
  * @param {Set<string>} [hiddenCategories] - categories to hide
  */
@@ -53,13 +101,58 @@ export function drawOverlay(svg, vw, vh, events, hiddenCategories) {
   // 1. Helix guide line (subtle)
   drawHelixGuide(g);
 
-  // 2. Era markers (century tick labels)
-  drawEraMarkers(g);
+  // ── Phase 1: Compute all label positions in screen space ──
 
-  // 3. Event markers + leader lines + labels
+  // 1a. Era marker screen positions
+  const eraScreen = computeEraScreenPositions();
+
+  // 1b. Event placement computation (filtering, positioning, track assignment)
+  const eventData = computeEventPlacements(events, hiddenCategories);
+
+  // 1c. Build unified label entry list for de-collision
+  const labelEntries = [];
+
+  // Event labels
+  for (let i = 0; i < eventData.positioned.length; i++) {
+    const e = eventData.positioned[i];
+    const pl = eventData.placements[i];
+    if (!pl || pl.clusterSize === 0) continue; // absorbed into cluster
+
+    const anchor = toScreen(e.anchorX, e.anchorY);
+    const labelY = pl.labelY != null ? toScreen(e.anchorX, pl.labelY).y : anchor.y;
+    const labelXDir = pl.side === "left" ? -1 : 1;
+    const trackOffset = LABEL_OFFSET_X + pl.track * 20;
+    const labelX = anchor.x + labelXDir * trackOffset;
+
+    labelEntries.push({
+      screenX: labelX,
+      screenY: labelY + 4,
+      key: `event:${i}`,
+    });
+  }
+
+  // Era tick labels
+  for (let i = 0; i < eraScreen.length; i++) {
+    labelEntries.push({
+      screenX: eraScreen[i].labelScreenX,
+      screenY: eraScreen[i].labelScreenY,
+      key: `era:${i}`,
+    });
+  }
+
+  // ── Phase 2: Unified screen-space de-collision ────────────
+
+  const adjustedYs = decolideAllLabels(labelEntries, vw / 2);
+
+  // ── Phase 3: Draw with adjusted positions ────────────────
+
+  // 3a. Era markers (ticks at original anchor, labels at adjusted Y)
+  drawEraMarkersAdjusted(g, eraScreen, adjustedYs);
+
+  // 3b. Event markers + leader lines + labels
   const anchorList = [];
-  if (events && events.length > 0) {
-    drawEvents(g, events, hiddenCategories, anchorList);
+  if (eventData.positioned.length > 0) {
+    drawEventsAdjusted(g, eventData.positioned, eventData.placements, anchorList, adjustedYs);
   }
 
   // Store on window for keyboard tooltip access
@@ -70,6 +163,67 @@ export function drawOverlay(svg, vw, vh, events, hiddenCategories) {
     _onAnchorsRendered(anchorList);
   }
 }
+
+// ── Event placement (filtering + track assignment, no drawing) ─
+
+/**
+ * @typedef {Object} EventPlacementData
+ * @property {Object[]} positioned - events with anchorX, anchorY, depth
+ * @property {import("./labels.js").LabelPlacement[]} placements - track assignments
+ */
+
+/**
+ * Filter, sort, position, and assign tracks for events.
+ * Pure computation — no DOM access.
+ *
+ * @param {Object[]} events
+ * @param {Set<string>} [hiddenCategories]
+ * @returns {EventPlacementData}
+ */
+function computeEventPlacements(events, hiddenCategories) {
+  if (!events || events.length === 0) {
+    return { positioned: [], placements: [] };
+  }
+
+  const lodThreshold = getLODThreshold();
+
+  // Filter by LOD sitelink threshold
+  const filtered = events.filter(
+    (e) => (e.sitelinks || 0) >= lodThreshold,
+  );
+
+  // Filter by hidden categories
+  const visible = hiddenCategories
+    ? filtered.filter((e) => !hiddenCategories.has(e.category))
+    : filtered;
+
+  // Sort by sitelinks desc, cap at 200
+  const sorted = [...visible].sort((a, b) => b.sitelinks - a.sitelinks);
+  const toShow = sorted.slice(0, 200);
+
+  if (toShow.length === 0) {
+    return { positioned: [], placements: [] };
+  }
+
+  // Compute anchor positions
+  const positioned = toShow.map((e) => {
+    const up = u(e.year);
+    const p = project(up);
+    return {
+      ...e,
+      anchorX: p.x,
+      anchorY: p.y,
+      depth: depth(up),
+    };
+  });
+
+  // Assign tracks (includes scene-space de-collision pass)
+  const placements = assignTracks(positioned);
+
+  return { positioned, placements };
+}
+
+// ── Drawing helpers ─────────────────────────────────────────
 
 /**
  * Draw the subtle helix guide line on the SVG overlay.
@@ -99,46 +253,34 @@ function drawHelixGuide(g) {
 }
 
 /**
- * Draw century and era markers along the coil.
+ * Draw era/millennium tick marks at their original anchor positions,
+ * and label text at de-collided screen Y positions.
+ *
+ * @param {SVGGElement} g
+ * @param {Array<{year:number, label:string, anchorX:number, anchorY:number, labelScreenX:number, labelScreenY:number}>} eraScreen
+ * @param {Map<string, number>} adjustedYs - keyed by "era:{i}"
  */
-function drawEraMarkers(g) {
-  const eras = [
-    { year: -2000, label: "2,000 BCE" },
-    { year: -1000, label: "1,000 BCE" },
-    { year: -500, label: "500 BCE" },
-    { year: 1, label: "1 CE" },
-    { year: 500, label: "500 CE" },
-    { year: 1000, label: "1000 CE" },
-    { year: 1500, label: "1500 CE" },
-    { year: 1800, label: "1800 CE" },
-    { year: 1900, label: "1900 CE" },
-    { year: 1950, label: "1950 CE" },
-    { year: 2000, label: "2000 CE" },
-    { year: 2026, label: "2026 CE" },
-  ];
+function drawEraMarkersAdjusted(g, eraScreen, adjustedYs) {
+  for (let i = 0; i < eraScreen.length; i++) {
+    const era = eraScreen[i];
+    const adjustedY = adjustedYs.get(`era:${i}`) ?? era.labelScreenY;
 
-  for (const era of eras) {
-    const up = u(era.year);
-    if (up < 0 || up > 1) continue;
-    const p = project(up);
-    const s = toScreen(p.x, p.y);
-
-    // Tick mark
+    // Tick mark at original anchor position
     const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", s.x - 4);
-    tick.setAttribute("y1", s.y);
-    tick.setAttribute("x2", s.x + 4);
-    tick.setAttribute("y2", s.y);
+    tick.setAttribute("x1", era.anchorX - 4);
+    tick.setAttribute("y1", era.anchorY);
+    tick.setAttribute("x2", era.anchorX + 4);
+    tick.setAttribute("y2", era.anchorY);
     tick.setAttribute("stroke", "#8b9a8b");
     tick.setAttribute("stroke-width", "0.5");
     tick.setAttribute("opacity", "0.5");
     tick.setAttribute("pointer-events", "none");
     g.appendChild(tick);
 
-    // Label
+    // Label at de-collided Y position
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("x", s.x + 8);
-    text.setAttribute("y", s.y + 4);
+    text.setAttribute("x", era.labelScreenX);
+    text.setAttribute("y", adjustedY);
     text.setAttribute("fill", "#8b9a8b");
     text.setAttribute("font-family", "monospace");
     text.setAttribute("font-size", "9");
@@ -151,43 +293,16 @@ function drawEraMarkers(g) {
 
 /**
  * Draw event markers with leader lines and labels.
+ * Leader lines terminate at the de-collided label position.
  * Emits {event, sx, sy} for each visible event anchor.
+ *
+ * @param {SVGGElement} g
+ * @param {Object[]} positioned - events with anchorX, anchorY, depth, plus event fields
+ * @param {import("./labels.js").LabelPlacement[]} placements - track assignments
+ * @param {Object[]} anchorList - output: filled with {event, sx, sy}
+ * @param {Map<string, number>} adjustedYs - keyed by "event:{i}"
  */
-function drawEvents(g, events, hiddenCategories, anchorList) {
-  const lodThreshold = getLODThreshold();
-
-  // Filter by LOD sitelink threshold
-  const filtered = events.filter(
-    (e) => (e.sitelinks || 0) >= lodThreshold,
-  );
-
-  // Filter by hidden categories
-  const visible = hiddenCategories
-    ? filtered.filter((e) => !hiddenCategories.has(e.category))
-    : filtered;
-
-  // Sort by sitelinks desc, cap at 200
-  const sorted = [...visible].sort((a, b) => b.sitelinks - a.sitelinks);
-  const toShow = sorted.slice(0, 200);
-
-  if (toShow.length === 0) return;
-
-  // Compute anchor positions
-  const positioned = toShow.map((e) => {
-    const up = u(e.year);
-    const p = project(up);
-    return {
-      ...e,
-      anchorX: p.x,
-      anchorY: p.y,
-      depth: depth(up),
-    };
-  });
-
-  // Assign tracks
-  const placements = assignTracks(positioned);
-
-  // Draw each event
+function drawEventsAdjusted(g, positioned, placements, anchorList, adjustedYs) {
   for (let i = 0; i < positioned.length; i++) {
     const e = positioned[i];
     const pl = placements[i];
@@ -201,16 +316,23 @@ function drawEvents(g, events, hiddenCategories, anchorList) {
     // Emit anchor for hover
     anchorList.push({ event: e, sx: anchor.x, sy: anchor.y });
 
-    // Label position — use de-collided Y from track assignment
+    // Label position — use de-collided Y from unified pass
     const labelXDir = pl.side === "left" ? -1 : 1;
     const trackOffset = LABEL_OFFSET_X + pl.track * 20;
     const labelX = anchor.x + labelXDir * trackOffset;
-    const labelY = pl.labelY != null ? toScreen(e.anchorX, pl.labelY).y : anchor.y;
+
+    // Compute original screen Y (from the scene-space labelY), then apply
+    // the screen-space adjustment delta. This preserves the scene-space
+    // de-collision stagger while also incorporating the unified pass.
+    const origScreenY = pl.labelY != null
+      ? toScreen(e.anchorX, pl.labelY).y + 4
+      : anchor.y + 4;
+    const labelY = adjustedYs.get(`event:${i}`) ?? origScreenY;
 
     // Elbow point (midway in X, same Y as anchor)
     const elbowX = anchor.x + labelXDir * LABEL_OFFSET_X * 0.6;
 
-    // Leader line
+    // Leader line — terminates at adjusted label position
     const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
     const pts = `${anchor.x},${anchor.y} ${elbowX},${anchor.y} ${labelX},${labelY}`;
     line.setAttribute("points", pts);
@@ -239,13 +361,13 @@ function drawEvents(g, events, hiddenCategories, anchorList) {
     circ.setAttribute("data-category", e.category || "");
     g.appendChild(circ);
 
-    // Label text
+    // Label text at de-collided Y position
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     const textAnchor = pl.side === "left" ? "end" : "start";
     const tx = pl.side === "left" ? labelX - 4 : labelX + 4;
 
     text.setAttribute("x", tx);
-    text.setAttribute("y", labelY + 4);
+    text.setAttribute("y", labelY);
     text.setAttribute("text-anchor", textAnchor);
     text.setAttribute("fill", color);
     text.setAttribute("font-family", "sans-serif");

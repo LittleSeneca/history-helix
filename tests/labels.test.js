@@ -2,7 +2,7 @@
 // Property-based tests for assignTracks()
 
 import { describe, it, expect } from "vitest";
-import { assignTracks, maxTrack, decolideLabels, MIN_LABEL_GAP } from "../src/render/labels.js";
+import { assignTracks, maxTrack, decolideLabels, decolideAllLabels, MIN_LABEL_GAP } from "../src/render/labels.js";
 import { TRACK_GAP } from "../src/config.js";
 
 /**
@@ -220,5 +220,78 @@ describe("decolideLabels — vertical spacing", () => {
 
     expect(placements[0].track).not.toBe(placements[1].track);
     expect(placements[0].labelY).not.toBe(placements[1].labelY);
+  });
+});
+
+describe("decolideAllLabels — unified screen-space de-collision", () => {
+  it("returns original Ys when no overlaps exist", () => {
+    const entries = [
+      { screenX: 500, screenY: 100, key: "a" },
+      { screenX: 500, screenY: 200, key: "b" },
+    ];
+    const result = decolideAllLabels(entries, 400);
+    expect(result.get("a")).toBe(100);
+    expect(result.get("b")).toBe(200);
+  });
+
+  it("pushes overlapping label down on same side", () => {
+    const entries = [
+      { screenX: 500, screenY: 100, key: "a" },
+      { screenX: 500, screenY: 105, key: "b" }, // too close
+    ];
+    const result = decolideAllLabels(entries, 400);
+    expect(result.get("a")).toBe(100);
+    expect(result.get("b")).toBe(100 + MIN_LABEL_GAP);
+  });
+
+  it("groups by screen side (left/right of viewport center)", () => {
+    // "a" and "b" are on opposite screen sides → shouldn't collide
+    const entries = [
+      { screenX: 100, screenY: 100, key: "a" },  // left of center 400
+      { screenX: 700, screenY: 105, key: "b" },  // right of center 400
+    ];
+    const result = decolideAllLabels(entries, 400);
+    // Both should be at their original positions (different sides)
+    expect(result.get("a")).toBe(100);
+    expect(result.get("b")).toBe(105);
+  });
+
+  it("pushes multiple overlapping labels in a chain", () => {
+    const entries = [
+      { screenX: 600, screenY: 100, key: "a" },
+      { screenX: 600, screenY: 105, key: "b" },
+      { screenX: 600, screenY: 108, key: "c" },
+    ];
+    const result = decolideAllLabels(entries, 400);
+    expect(result.get("a")).toBe(100);
+    expect(result.get("b")).toBe(100 + MIN_LABEL_GAP);
+    expect(result.get("c")).toBe(100 + MIN_LABEL_GAP * 2);
+  });
+
+  it("preserves order: earlier label never moves past later label", () => {
+    const entries = [
+      { screenX: 600, screenY: 100, key: "first" },
+      { screenX: 600, screenY: 102, key: "second" },
+    ];
+    const result = decolideAllLabels(entries, 400);
+    expect(result.get("first")).toBeLessThan(result.get("second"));
+  });
+
+  it("handles mixed event and era entries together", () => {
+    const entries = [
+      { screenX: 600, screenY: 100, key: "event:0" },
+      { screenX: 610, screenY: 105, key: "era:0" },  // close to event
+      { screenX: 600, screenY: 108, key: "event:1" },
+    ];
+    const result = decolideAllLabels(entries, 400);
+    // All three should be spaced by at least MIN_LABEL_GAP
+    const ys = [
+      result.get("event:0"),
+      result.get("era:0"),
+      result.get("event:1"),
+    ];
+    for (let i = 1; i < ys.length; i++) {
+      expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(MIN_LABEL_GAP);
+    }
   });
 });
