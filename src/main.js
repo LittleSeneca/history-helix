@@ -5,11 +5,11 @@
 //
 // B-4: id-buffer strand picking with hover highlight and person tooltip.
 
-import { loadDemographics, loadPeople } from "./data/load.js";
+import { loadDemographics, loadPeople, pop } from "./data/load.js";
 import { peopleStrands } from "./geometry/coil.js";
 import { buildStrandBatches, renderScene } from "./render/strands.js";
 import { drawOverlay, onAnchorsRendered } from "./render/overlay.js";
-import { tMin, tMax } from "./geometry/helix.js";
+import { tMin, tMax, buildDensityCache } from "./geometry/helix.js";
 import * as viewport from "./interaction/viewport.js";
 import {
   initHover,
@@ -32,16 +32,13 @@ import {
   jumpToEvent,
 } from "./interaction/filters.js";
 import { createPanel, updateEraBanner, updateFilterRail } from "./ui/panel.js";
+import { SPREAD } from "./config.js";
 
 // ── DOM refs ────────────────────────────────────────────────
 
 const canvas = document.getElementById("scene");
 const svg = document.getElementById("overlay");
 const ctx = canvas.getContext("2d");
-
-// ── Constants ───────────────────────────────────────────────
-
-const BAND_PX = 8;
 
 // ── State ───────────────────────────────────────────────────
 
@@ -172,6 +169,7 @@ async function init() {
 
   // 2. Initialize viewport
   resize();
+  window.__getZoom = () => viewport.getZoom();
   viewport.onUpdate(() => {
     // Invalidate picking buffer immediately; rebuild on settle
     invalidatePicking();
@@ -293,6 +291,10 @@ async function init() {
   await loadDemographics();
   console.log("[history-helix] demographics loaded — pop envelope ready");
 
+  // C-1: build density cache for density-driven coil radius R(u)
+  buildDensityCache(pop);
+  console.log("[history-helix] density cache built for R(u)");
+
   // Load real people
   try {
     console.log("[history-helix] loading people…");
@@ -300,7 +302,7 @@ async function init() {
     console.log(`[history-helix] people loaded: ${people.length} records`);
 
     // Generate strands from real people, filtered to [tMin, tMax]
-    const { strands, filtered } = peopleStrands(people, tMin, tMax, BAND_PX);
+    const { strands, filtered } = peopleStrands(people, tMin, tMax, SPREAD);
     strandData = strands;
     window.__strandCount = strands.length;
     window.__filteredOut = filtered;

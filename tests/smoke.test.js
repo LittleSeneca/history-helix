@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TURNS, LEAN_DEG, SQUASH, R, BUDGET, colors, tMin, tMax } from "../src/config.js";
+import { TURNS, LEAN_DEG, SQUASH, R_BASE, DENSITY_GAIN, SPREAD, BUDGET, colors, tMin, tMax } from "../src/config.js";
 
 describe("config", () => {
   it("exports TURNS = 6", () => {
@@ -14,8 +14,16 @@ describe("config", () => {
     expect(SQUASH).toBe(0.45);
   });
 
-  it("exports R = 250", () => {
-    expect(R).toBe(250);
+  it("exports R_BASE = 180", () => {
+    expect(R_BASE).toBe(180);
+  });
+
+  it("exports DENSITY_GAIN = 170", () => {
+    expect(DENSITY_GAIN).toBe(170);
+  });
+
+  it("exports SPREAD = 20", () => {
+    expect(SPREAD).toBe(20);
   });
 
   it("exports BUDGET = 60_000", () => {
