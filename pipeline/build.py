@@ -26,9 +26,29 @@ def main() -> None:
         print("ERROR: demographics pipeline failed", file=sys.stderr)
         sys.exit(result.returncode)
 
-    # Events (A-5 — not yet implemented)
-    # events_script = REPO_ROOT / "pipeline" / "fetch_events.py"
-    # ...
+    # Events
+    events_script = REPO_ROOT / "pipeline" / "fetch_events.py"
+    print(f"Running {events_script}...", flush=True)
+    result = subprocess.run(
+        [sys.executable, str(events_script)],
+        cwd=REPO_ROOT,
+        capture_output=False,
+    )
+    if result.returncode != 0:
+        print("ERROR: events pipeline failed", file=sys.stderr)
+        sys.exit(result.returncode)
+
+    # People
+    people_script = REPO_ROOT / "pipeline" / "fetch_people.py"
+    print(f"Running {people_script}...", flush=True)
+    result = subprocess.run(
+        [sys.executable, str(people_script)],
+        cwd=REPO_ROOT,
+        capture_output=False,
+    )
+    if result.returncode != 0:
+        print("ERROR: people pipeline failed", file=sys.stderr)
+        sys.exit(result.returncode)
 
     print("Build complete.", flush=True)
 

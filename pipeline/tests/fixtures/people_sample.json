@@ -1,0 +1,72 @@
+[
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q567"},
+    "personLabel": {"value": "Marie Curie"},
+    "birth": {"value": "+1867-11-07T00:00:00Z"},
+    "death": {"value": "+1934-07-04T00:00:00Z"},
+    "sitelinks": {"value": "200"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q8023"},
+    "personLabel": {"value": "Nelson Mandela"},
+    "birth": {"value": "+1918-07-18T00:00:00Z"},
+    "death": {"value": "+2013-12-05T00:00:00Z"},
+    "sitelinks": {"value": "250"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q140"},
+    "personLabel": {"value": "Julius Caesar"},
+    "birth": {"value": "-0099-07-12T00:00:00Z"},
+    "death": {"value": "-0043-03-15T00:00:00Z"},
+    "sitelinks": {"value": "180"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q859"},
+    "personLabel": {"value": "Cleopatra"},
+    "birth": {"value": "-0068-01-01T00:00:00Z"},
+    "death": {"value": "-0029-08-12T00:00:00Z"},
+    "sitelinks": {"value": "150"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q7645"},
+    "personLabel": {"value": "Hypatia"},
+    "birth": {"value": "+0350-01-01T00:00:00Z"},
+    "death": {"value": "+0415-03-01T00:00:00Z"},
+    "sitelinks": {"value": "80"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q131413"},
+    "personLabel": {"value": "Ibn Sina"},
+    "birth": {"value": "+0980-01-01T00:00:00Z"},
+    "death": {"value": "+1037-06-01T00:00:00Z"},
+    "sitelinks": {"value": "120"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q9032"},
+    "personLabel": {"value": "Murasaki Shikibu"},
+    "birth": {"value": "+0973-01-01T00:00:00Z"},
+    "death": {"value": "+1014-01-01T00:00:00Z"},
+    "sitelinks": {"value": "70"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q7251"},
+    "personLabel": {"value": "Alan Turing"},
+    "birth": {"value": "+1912-06-23T00:00:00Z"},
+    "death": {"value": "+1954-06-07T00:00:00Z"},
+    "sitelinks": {"value": "190"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q5582"},
+    "personLabel": {"value": "Vincent van Gogh"},
+    "birth": {"value": "+1853-03-30T00:00:00Z"},
+    "death": {"value": "+1890-07-29T00:00:00Z"},
+    "sitelinks": {"value": "175"}
+  },
+  {
+    "person": {"value": "http://www.wikidata.org/entity/Q8683"},
+    "personLabel": {"value": "Mansa Musa"},
+    "birth": {"value": "+1280-01-01T00:00:00Z"},
+    "death": {"value": "+1337-01-01T00:00:00Z"},
+    "sitelinks": {"value": "90"}
+  }
+]
