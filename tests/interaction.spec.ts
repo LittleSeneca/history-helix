@@ -250,26 +250,45 @@ test("mouse drag pans the scene", async ({ page }) => {
 test("scroll wheel zooms the scene", async ({ page }) => {
   await waitForApp(page);
 
-  // Count visible event markers before zoom
-  const beforeCount = await page.evaluate(() => {
-    return document.querySelectorAll("#overlay circle[data-event-id]").length;
-  });
-
-  // Zoom in with scroll wheel
   const centerX = page.viewportSize()!.width / 2;
   const centerY = page.viewportSize()!.height / 2;
 
   await page.mouse.move(centerX, centerY);
-  await page.mouse.wheel(0, -500); // zoom in (negative deltaY)
-  await page.waitForTimeout(500);
 
-  // Count event markers after zoom — should change (LOD may show more or fewer)
-  const afterCount = await page.evaluate(() => {
-    return document.querySelectorAll("#overlay circle[data-event-id]").length;
+  // Record scale before zoom
+  const scaleBefore = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
   });
+  expect(scaleBefore).toBeGreaterThan(0);
 
-  // Just verify the app didn't crash — count should be reasonable
-  expect(afterCount).toBeGreaterThanOrEqual(0);
+  // Zoom with scroll wheel UP (deltaY < 0) — should zoom IN
+  await page.mouse.wheel(0, -500);
+  await page.waitForTimeout(300);
+
+  const scaleAfterUp = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(scaleAfterUp).toBeGreaterThan(0);
+
+  // scroll up (deltaY < 0) → zoom in → scale increases
+  console.log(`[wheel-up]  before: ${scaleBefore.toFixed(4)}  after: ${scaleAfterUp.toFixed(4)}`);
+  expect(scaleAfterUp).toBeGreaterThan(scaleBefore);
+
+  // Zoom with scroll wheel DOWN (deltaY > 0) — should zoom OUT
+  await page.mouse.wheel(0, 500);
+  await page.waitForTimeout(300);
+
+  const scaleAfterDown = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(scaleAfterDown).toBeGreaterThan(0);
+
+  // scroll down (deltaY > 0) → zoom out → scale decreases
+  console.log(`[wheel-down] before: ${scaleAfterUp.toFixed(4)}  after: ${scaleAfterDown.toFixed(4)}`);
+  expect(scaleAfterDown).toBeLessThan(scaleAfterUp);
 });
 
 // ── Search ──────────────────────────────────────────────────
