@@ -1,11 +1,21 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * ── B-7 Regression guard: zero overlapping labels ────────────
+ * ── B-8 Regression guard: zero overlapping label boxes ─────
  *
- * Enumerates every <text> element in the overlay SVG, groups by screen side
- * (left/right of viewport centre), and counts pairs where horizontal bounds
- * overlap AND the vertical gap is negative.
+ * Enumerates every <text> element in the overlay SVG and measures its
+ * RENDERED BOUNDING BOX via getBBox() (not the y/x attributes — those are
+ * baseline *anchors*). It then counts pairs whose horizontal bounds overlap
+ * AND whose vertical gap (`b.top − a.bottom`) is negative, i.e. glyphs that
+ * actually collide on screen.
+ *
+ * This is deliberately a box-overlap assertion, NOT an anchor-gap assertion.
+ * The old approach (asserting a fixed 14px gap between label `y` anchors)
+ * could not catch the B-8 defect: a ~11–16px glyph box is taller than the
+ * 14px anchor gap, and a left-anchored label near the centre can extend back
+ * across the centre to overlap a label grouped onto the other side. Two
+ * anchors "14px apart" still rendered overlapping glyphs. Only bounding-box
+ * overlap sees that.
  *
  * Acceptance: 0 overlapping pairs at default zoom, and at one zoomed-in
  * and one zoomed-out level.
@@ -28,7 +38,9 @@ interface OverlapPair {
 }
 
 /**
- * Extract bounds for every <text> element in the overlay SVG.
+ * Extract the rendered bounding box for every <text> element in the overlay
+ * SVG, using getBBox() (SVG user-space = screen px here, since the overlay
+ * has a `0 0 w h` viewBox and no transform).
  */
 async function getTextBounds(page): Promise<TextBounds[]> {
   return page.evaluate(() => {
@@ -39,7 +51,7 @@ async function getTextBounds(page): Promise<TextBounds[]> {
     const results: TextBounds[] = [];
 
     for (const t of texts) {
-      const rect = t.getBoundingClientRect();
+      const rect = t.getBBox();
       // Skip elements with zero dimensions (hidden/invisible)
       if (rect.width === 0 && rect.height === 0) continue;
 
@@ -57,8 +69,9 @@ async function getTextBounds(page): Promise<TextBounds[]> {
 }
 
 /**
- * Group text elements by screen side (left/right of viewport centre),
- * count pairs where horizontal bounds overlap AND vertical gap is negative.
+ * Group text boxes by screen side (left/right of the overlay's centre),
+ * count pairs where horizontal bounds overlap AND the vertical gap is
+ * negative (`b.top − a.bottom < 0`).
  *
  * Returns the overlap count and a list of overlapping pairs.
  */
@@ -72,11 +85,12 @@ async function measureOverlaps(page): Promise<{
     return { count: 0, pairs: [] };
   }
 
-  // Compute viewport dimensions
-  const vp = page.viewportSize()!;
-  const centerX = vp.width / 2;
+  // Centre of the overlay in its own (screen-px) coordinate space
+  const centerX = await page.evaluate(
+    () => (document.getElementById("overlay") as SVGSVGElement).clientWidth / 2,
+  );
 
-  // Group by screen side
+  // Group by screen side (box centre vs overlay centre)
   const left = bounds.filter((b) => b.x + b.width / 2 < centerX);
   const right = bounds.filter((b) => b.x + b.width / 2 >= centerX);
 
@@ -144,7 +158,7 @@ async function waitForApp(page) {
 
 // ── Tests ────────────────────────────────────────────────────
 
-test("B-7: zero overlapping label pairs at default zoom", async ({ page }) => {
+test("B-8: zero overlapping label pairs at default zoom", async ({ page }) => {
   await waitForApp(page);
 
   const result = await measureOverlaps(page);
@@ -159,7 +173,7 @@ test("B-7: zero overlapping label pairs at default zoom", async ({ page }) => {
   expect(result.count).toBe(0);
 });
 
-test("B-7: zero overlapping label pairs after zoom in", async ({ page }) => {
+test("B-8: zero overlapping label pairs after zoom in", async ({ page }) => {
   await waitForApp(page);
 
   // Zoom in (3 scroll-wheel steps)
@@ -182,7 +196,7 @@ test("B-7: zero overlapping label pairs after zoom in", async ({ page }) => {
   expect(result.count).toBe(0);
 });
 
-test("B-7: zero overlapping label pairs after zoom out", async ({ page }) => {
+test("B-8: zero overlapping label pairs after zoom out", async ({ page }) => {
   await waitForApp(page);
 
   // Zoom out (3 scroll-wheel steps)
@@ -205,7 +219,7 @@ test("B-7: zero overlapping label pairs after zoom out", async ({ page }) => {
   expect(result.count).toBe(0);
 });
 
-test("B-7: era tick labels are present in the overlay", async ({ page }) => {
+test("B-8: era tick labels are present in the overlay", async ({ page }) => {
   await waitForApp(page);
 
   const eraTexts = await page.evaluate(() => {
@@ -234,7 +248,7 @@ test("B-7: era tick labels are present in the overlay", async ({ page }) => {
   expect(has1000 || has1900 || has2000).toBe(true);
 });
 
-test("B-7: leader lines terminate at label positions", async ({ page }) => {
+test("B-8: leader lines terminate at label positions", async ({ page }) => {
   await waitForApp(page);
 
   const result = await page.evaluate(() => {
