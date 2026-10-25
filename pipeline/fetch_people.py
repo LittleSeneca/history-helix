@@ -242,8 +242,8 @@ def normalize_person(row: dict) -> dict | None:
     except (ValueError, TypeError):
         return None
 
-    # Normalize dates using the same function as the events pipeline
-    # (handles Wikidata year-zero offset: 1 BCE → year 0 → our -1)
+    # Normalize dates using shared signed-year convention (see fetch_events.normalize_date).
+    # 1 BCE → -1, 2 BCE → -2, …, no year 0.  Wikidata +0000/0000 → 1 CE.
     birth = normalize_date(birth_str, 9)   # precision 9 = year (not used further)
     death = normalize_date(death_str, 9)
 
