@@ -1,19 +1,20 @@
 // Strand rendering — batched Path2D, single pass (DESIGN.md §2.2, §3.2–3.3)
 //
-// Strategy: group all strands by era color → one Path2D per era.
-// That gives at most 7 stroke() calls (one per era), well under the ≤10 target.
-// The two-pass depth split is dropped: the visual difference between alpha 0.35
-// and 0.55 on 0.8 px lines is negligible, and the DESIGN.md explicitly sets
-// <10 stroke calls as the target (§3.3).
+// Strategy: group all strands by palette index → one Path2D per color.
+// That gives exactly PALETTE_SIZE stroke() calls (≤64), well under the
+// naïve count of one-per-strand (27,944).
 //
 // Uses the viewport module for pan/zoom transform.
 //
 // B-4: adds picking-buffer rendering (color-encoded strand indices),
 // single-strand highlight drawing, and hover highlight/dim support.
+//
+// C-2: per-life pastel colors replace era-based coloring. Colors are
+// deterministic from the person's name + birth year.
 
 import { project, tMin, tMax } from "../geometry/helix.js";
 import { strandPath } from "../geometry/coil.js";
-import { colors } from "../config.js";
+import { colorIndex, colorAt, PALETTE_SIZE } from "./palette.js";
 import { toScreen, getZoom } from "../interaction/viewport.js";
 import { pop } from "../data/load.js";
 
@@ -126,21 +127,24 @@ export function drawPopulationEnvelope(ctx) {
 // ── Strand batching ─────────────────────────────────────────
 
 /**
- * Build one Path2D per era color.
- * All strands (front and back) go into the same batch — one stroke() per era.
+ * Build one Path2D per palette index.
+ * All strands (front and back) go into the same batch — one stroke() per color.
  *
- * @param {{u0:number, u1:number, rho:number, cohortPhase:number, era:string}[]} strands
- * @returns {Map<string, Path2D>}
+ * @param {{u0:number, u1:number, rho:number, cohortPhase:number, era:string, person?:{name:string, birth:number, sourceUrl:string}}[]} strands
+ * @returns {Map<number, Path2D>}
  */
 export function buildStrandBatches(strands) {
   const batches = new Map();
 
   for (const s of strands) {
-    const era = s.era;
-    if (!batches.has(era)) {
-      batches.set(era, new Path2D());
+    const idx = s._paletteIdx ?? colorIndex(s.person || null);
+    // Cache on the strand so colorFor is stable even if person data shifts
+    s._paletteIdx = idx;
+
+    if (!batches.has(idx)) {
+      batches.set(idx, new Path2D());
     }
-    const batch = batches.get(era);
+    const batch = batches.get(idx);
     const path = strandPath(s.u0, s.u1, s.rho, s.cohortPhase);
     batch.addPath(path);
   }
@@ -167,13 +171,13 @@ function _normalizedLineWidth() {
 }
 
 /**
- * Draw all strand batches — one stroke() per era (7 calls total, ≤ 10 target).
+ * Draw all strand batches — one stroke() per palette index (≤64 calls).
  *
  * Supports highlight mode: when hoveredIndex is set, all strands are dimmed
- * and the hovered strand is drawn bright/thick on top.
+ * and the hovered strand is drawn bright/thick on top as white + its own color glow.
  *
  * @param {CanvasRenderingContext2D} ctx
- * @param {Map<string, Path2D>} batches
+ * @param {Map<number, Path2D>} batches
  * @param {object} [opts]
  * @param {number} [opts.hoveredIndex] - index of the hovered strand (if any)
  * @param {object[]} [opts.strands] - strand data array (needed for highlight)
@@ -190,10 +194,8 @@ export function drawStrands(ctx, batches, opts = {}) {
   // Dimmed pass: all strands at reduced alpha when highlighting
   const alpha = hasHighlight ? 0.15 : 0.45;
 
-  const highlightEra = hasHighlight ? strands[hoveredIndex].era : null;
-
-  for (const [era, path] of batches) {
-    const color = colors[era] || "#888888";
+  for (const [idx, path] of batches) {
+    const color = colorAt(idx);
     ctx.strokeStyle = color;
     ctx.lineWidth = lw;
     ctx.globalAlpha = alpha;
@@ -203,6 +205,9 @@ export function drawStrands(ctx, batches, opts = {}) {
   // Highlight pass: draw the single hovered strand bright and thick
   if (hasHighlight) {
     const s = strands[hoveredIndex];
+    const highlightIdx = s._paletteIdx ?? colorIndex(s.person || null);
+    const highlightColor = colorAt(highlightIdx);
+
     ctx.globalAlpha = 1;
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = lw * 2.5;
@@ -210,8 +215,8 @@ export function drawStrands(ctx, batches, opts = {}) {
     const p = strandPath(s.u0, s.u1, s.rho, s.cohortPhase);
     ctx.stroke(p);
 
-    // Also draw a slightly wider glow
-    ctx.strokeStyle = colors[highlightEra] || "#ffffff";
+    // Also draw a slightly wider glow in the strand's own pastel
+    ctx.strokeStyle = highlightColor;
     ctx.lineWidth = lw * 1.5;
     ctx.globalAlpha = 0.7;
     ctx.stroke(p);

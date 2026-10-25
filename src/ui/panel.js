@@ -250,16 +250,28 @@ function _createLegend(container) {
     color: "#888",
   });
 
-  // Strand legend: era colors
+  // Strand legend: pastel palette swatch (C-2)
   const strandPart = document.createElement("div");
   strandPart.innerHTML = "<span style='opacity:0.6'>strands:</span> ";
 
-  for (const [era, color] of Object.entries(ERA_COLORS)) {
-    const span = document.createElement("span");
-    span.style.color = color;
-    span.style.marginRight = "4px";
-    span.textContent = era;
-    strandPart.appendChild(span);
+  // Mini swatch of 8 pastel samples representing the full 64-color palette
+  const SWATCH_COLORS = [
+    "#d8c4c4", "#ded4ce", "#e4e2c8", "#d5d8c4",
+    "#d8e4d7", "#c4d8c9", "#d7e4e4", "#c4d0d8",
+    "#ced2de", "#d8d7e4", "#cec4d8", "#e4d7e1",
+    "#d8c4cc", "#e2babe", "#e9d6d2", "#e2c5ba",
+  ];
+
+  for (const color of SWATCH_COLORS) {
+    const swatch = document.createElement("span");
+    swatch.style.display = "inline-block";
+    swatch.style.width = "8px";
+    swatch.style.height = "8px";
+    swatch.style.borderRadius = "1px";
+    swatch.style.backgroundColor = color;
+    swatch.style.marginRight = "1px";
+    swatch.title = `${SWATCH_COLORS.length} of 64 pastel colors`;
+    strandPart.appendChild(swatch);
   }
 
   el.appendChild(strandPart);
