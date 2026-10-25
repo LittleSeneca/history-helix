@@ -4,8 +4,23 @@
 
 import { TRACK_GAP } from "../config.js";
 
-/** Vertical gap enforced between label text blocks on the same side. */
+/**
+ * Vertical gap (scene units) enforced between label anchors by the
+ * scene-space pre-pass (`decolideLabels`). This is a coarse stagger, not
+ * the final on-screen separation — the screen-space pass measures the real
+ * glyph boxes and enforces `LABEL_PAD` between their edges instead.
+ */
 export const MIN_LABEL_GAP = 14;
+
+/**
+ * Padding (screen px) left between adjacent label bounding-box *edges* after
+ * the height-aware screen-space de-collision (`decolideAllLabels`). The old
+ * code enforced a fixed 14px between baseline *anchors*, which let ~11–16px
+ * glyph boxes overlap; this pad is applied between measured box edges, so it
+ * is independent of each label's rendered height. Chosen small enough to
+ * avoid wasting vertical space, large enough that adjacent glyphs never touch.
+ */
+export const LABEL_PAD = 2;
 
 /**
  * @typedef {Object} LabelPlacement
@@ -229,51 +244,55 @@ export function decolideLabels(placements, events) {
 }
 
 /**
- * Screen-space unified de-collision for all rendered labels.
- * Covers event labels AND era/millennium ticks together in one pass.
+ * Screen-space unified de-collision over measured label bounding boxes.
  *
- * Groups labels by screen side (left/right of viewport center), sorts each
- * group vertically by screenY, and pushes overlapping labels down to maintain
- * at least MIN_LABEL_GAP pixels of vertical separation on screen.
+ * Replaces the old fixed-gap pass, which spaced *baseline anchors* by a
+ * constant MIN_LABEL_GAP and so could not see that a label's rendered glyph
+ * box is taller than the gap. That pass also grouped by the label's *anchor*
+ * X, so a left-anchored label whose text extends back across the viewport
+ * centre could overlap a label grouped onto the other side without ever
+ * being compared (the "1000 CE" era tick vs the 1917 revolutions were
+ * exactly this failure).
  *
- * @param {Array<{screenX: number, screenY: number, key: string}>} entries
- *   Each entry represents one text element:
- *   - screenX: text x position in screen pixels
- *   - screenY: text y (baseline) position in screen pixels
- *   - key: unique identifier (e.g., "event:0", "era:5")
- * @param {number} vpCenterX - viewport width / 2 (screen pixels)
- * @returns {Map<string, number>} adjusted screenY value for each entry key
+ * This pass takes the actual `getBBox()` of every rendered `<text>` and:
+ *   1. sorts boxes by their top edge,
+ *   2. for each box, finds every already-placed box whose horizontal range
+ *      overlaps it, and pushes the box down until its top sits at least
+ *      LABEL_PAD below the lowest such box's bottom edge.
+ *
+ * Horizontal overlap is the true collision condition and replaces the old
+ * side grouping entirely — labels near the centre can no longer slip through
+ * on opposite "sides".
+ *
+ * @param {Array<{key:string, left:number, right:number, top:number, bottom:number}>} boxes
+ *   Measured bounding boxes (getBBox()), in screen pixels.
+ * @returns {Map<string, number>} vertical shift (px) per key. Add to the
+ *   text baseline AND any leader-line end point for that label.
  */
-export function decolideAllLabels(entries, vpCenterX) {
-  const left = [];
-  const right = [];
+export function decolideAllLabels(boxes) {
+  const sorted = [...boxes].sort((a, b) => a.top - b.top);
+  const shifts = new Map();
+  /** @type {Array<{left:number, right:number, bottom:number}>} */
+  const placed = [];
 
-  for (const e of entries) {
-    if (e.screenX < vpCenterX) {
-      left.push(e);
-    } else {
-      right.push(e);
+  for (const b of sorted) {
+    let maxBottom = -Infinity;
+    for (const p of placed) {
+      const hOverlap = b.left < p.right && p.left < b.right;
+      if (hOverlap && p.bottom > maxBottom) maxBottom = p.bottom;
     }
+
+    let shift = 0;
+    if (maxBottom > -Infinity) {
+      const minTop = maxBottom + LABEL_PAD;
+      if (b.top < minTop) shift = minTop - b.top;
+    }
+
+    shifts.set(b.key, shift);
+    placed.push({ left: b.left, right: b.right, bottom: b.bottom + shift });
   }
 
-  const adjusted = new Map();
-
-  for (const group of [left, right]) {
-    // Sort by screenY ascending
-    group.sort((a, b) => a.screenY - b.screenY);
-
-    for (let i = 0; i < group.length; i++) {
-      let sy = group[i].screenY;
-      if (i > 0) {
-        const prevAdjusted = adjusted.get(group[i - 1].key);
-        const minY = prevAdjusted + MIN_LABEL_GAP;
-        if (sy < minY) sy = minY;
-      }
-      adjusted.set(group[i].key, sy);
-    }
-  }
-
-  return adjusted;
+  return shifts;
 }
 
 /**

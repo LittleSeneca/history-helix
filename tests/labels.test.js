@@ -2,7 +2,7 @@
 // Property-based tests for assignTracks()
 
 import { describe, it, expect } from "vitest";
-import { assignTracks, maxTrack, decolideLabels, decolideAllLabels, MIN_LABEL_GAP } from "../src/render/labels.js";
+import { assignTracks, maxTrack, decolideLabels, decolideAllLabels, MIN_LABEL_GAP, LABEL_PAD } from "../src/render/labels.js";
 import { TRACK_GAP } from "../src/config.js";
 
 /**
@@ -223,75 +223,103 @@ describe("decolideLabels — vertical spacing", () => {
   });
 });
 
-describe("decolideAllLabels — unified screen-space de-collision", () => {
-  it("returns original Ys when no overlaps exist", () => {
-    const entries = [
-      { screenX: 500, screenY: 100, key: "a" },
-      { screenX: 500, screenY: 200, key: "b" },
+describe("decolideAllLabels — height-aware screen-space de-collision", () => {
+  /**
+   * Build a measured-box entry. `height` is the rendered glyph height;
+   * top/bottom are derived so the box spans [top, top+height].
+   */
+  function box(key, { left = 0, right = 100, top, height = 10 }) {
+    return { key, left, right, top, bottom: top + height };
+  }
+
+  it("returns zero shifts when no boxes overlap vertically", () => {
+    const boxes = [
+      box("a", { top: 100 }),
+      box("b", { top: 200 }),
     ];
-    const result = decolideAllLabels(entries, 400);
-    expect(result.get("a")).toBe(100);
-    expect(result.get("b")).toBe(200);
+    const result = decolideAllLabels(boxes);
+    expect(result.get("a")).toBe(0);
+    expect(result.get("b")).toBe(0);
   });
 
-  it("pushes overlapping label down on same side", () => {
-    const entries = [
-      { screenX: 500, screenY: 100, key: "a" },
-      { screenX: 500, screenY: 105, key: "b" }, // too close
+  it("pushes an overlapping box down so its top clears the prev bottom + LABEL_PAD", () => {
+    const boxes = [
+      box("a", { top: 100, height: 10 }), // bottom = 110
+      box("b", { top: 105, height: 10 }), // overlaps a (105 < 110)
     ];
-    const result = decolideAllLabels(entries, 400);
-    expect(result.get("a")).toBe(100);
-    expect(result.get("b")).toBe(100 + MIN_LABEL_GAP);
+    const result = decolideAllLabels(boxes);
+    expect(result.get("a")).toBe(0);
+    expect(result.get("b")).toBe(110 + LABEL_PAD - 105);
   });
 
-  it("groups by screen side (left/right of viewport center)", () => {
-    // "a" and "b" are on opposite screen sides → shouldn't collide
-    const entries = [
-      { screenX: 100, screenY: 100, key: "a" },  // left of center 400
-      { screenX: 700, screenY: 105, key: "b" },  // right of center 400
+  it("derives the gap from the TALLER label's measured height, not a constant", () => {
+    // Old code spaced *baseline anchors* 14px apart, so two tall boxes could
+    // still overlap. Here `a` is 20px tall; `b` must clear `a`'s real bottom.
+    const boxes = [
+      box("a", { top: 100, height: 20 }), // bottom = 120
+      box("b", { top: 105, height: 10 }),
     ];
-    const result = decolideAllLabels(entries, 400);
-    // Both should be at their original positions (different sides)
-    expect(result.get("a")).toBe(100);
-    expect(result.get("b")).toBe(105);
+    const result = decolideAllLabels(boxes);
+    expect(result.get("a")).toBe(0);
+    expect(result.get("b")).toBe(120 + LABEL_PAD - 105);
   });
 
-  it("pushes multiple overlapping labels in a chain", () => {
-    const entries = [
-      { screenX: 600, screenY: 100, key: "a" },
-      { screenX: 600, screenY: 105, key: "b" },
-      { screenX: 600, screenY: 108, key: "c" },
+  it("does NOT push boxes with disjoint horizontal ranges (opposite sides)", () => {
+    const boxes = [
+      box("a", { left: 0, right: 100, top: 100 }),
+      box("b", { left: 500, right: 600, top: 105 }), // no horizontal overlap
     ];
-    const result = decolideAllLabels(entries, 400);
-    expect(result.get("a")).toBe(100);
-    expect(result.get("b")).toBe(100 + MIN_LABEL_GAP);
-    expect(result.get("c")).toBe(100 + MIN_LABEL_GAP * 2);
+    const result = decolideAllLabels(boxes);
+    expect(result.get("a")).toBe(0);
+    expect(result.get("b")).toBe(0);
   });
 
-  it("preserves order: earlier label never moves past later label", () => {
-    const entries = [
-      { screenX: 600, screenY: 100, key: "first" },
-      { screenX: 600, screenY: 102, key: "second" },
+  it("pushes multiple overlapping boxes in a chain", () => {
+    const boxes = [
+      box("a", { top: 100, height: 10 }), // bottom 110
+      box("b", { top: 105, height: 10 }), // bottom 115
+      box("c", { top: 108, height: 10 }), // bottom 118
     ];
-    const result = decolideAllLabels(entries, 400);
-    expect(result.get("first")).toBeLessThan(result.get("second"));
+    const result = decolideAllLabels(boxes);
+    expect(result.get("a")).toBe(0);
+    expect(result.get("b")).toBe(110 + LABEL_PAD - 105); // 7
+    // b's shifted bottom edge = b.bottom + shift_b = 115 + 7 = 122
+    const bShiftedBottom = 115 + (110 + LABEL_PAD - 105);
+    expect(result.get("c")).toBe(bShiftedBottom + LABEL_PAD - 108); // 16
   });
 
-  it("handles mixed event and era entries together", () => {
-    const entries = [
-      { screenX: 600, screenY: 100, key: "event:0" },
-      { screenX: 610, screenY: 105, key: "era:0" },  // close to event
-      { screenX: 600, screenY: 108, key: "event:1" },
+  it("preserves vertical order: an earlier box never ends below a later box's top", () => {
+    const boxes = [
+      box("first", { top: 100, height: 10 }),
+      box("second", { top: 102, height: 10 }),
     ];
-    const result = decolideAllLabels(entries, 400);
-    // All three should be spaced by at least MIN_LABEL_GAP
-    const ys = [
-      result.get("event:0"),
-      result.get("era:0"),
-      result.get("event:1"),
+    const result = decolideAllLabels(boxes);
+    const firstBottom = 110 + result.get("first");
+    const secondTop = 102 + result.get("second");
+    expect(firstBottom).toBeLessThanOrEqual(secondTop - LABEL_PAD + 0.001);
+  });
+
+  it("handles mixed event and era boxes together (era tick participates)", () => {
+    const boxes = [
+      box("event:0", { top: 100, height: 11 }),
+      box("era:0", { top: 104, height: 9 }),   // era ticks are shorter
+      box("event:1", { top: 106, height: 11 }),
     ];
-    for (let i = 1; i < ys.length; i++) {
-      expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(MIN_LABEL_GAP);
+    const result = decolideAllLabels(boxes);
+    const shifts = [result.get("event:0"), result.get("era:0"), result.get("event:1")];
+    // Every box after the first must clear the box above it.
+    const tops = [
+      boxes[0].top + shifts[0],
+      boxes[1].top + shifts[1],
+      boxes[2].top + shifts[2],
+    ];
+    const bottoms = [
+      boxes[0].bottom + shifts[0],
+      boxes[1].bottom + shifts[1],
+      boxes[2].bottom + shifts[2],
+    ];
+    for (let i = 1; i < tops.length; i++) {
+      expect(tops[i]).toBeGreaterThanOrEqual(bottoms[i - 1] + LABEL_PAD - 0.001);
     }
   });
 });

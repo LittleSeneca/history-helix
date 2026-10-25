@@ -81,8 +81,11 @@ function computeEraScreenPositions() {
  * Draw the full SVG overlay on the given SVG element.
  *
  * Phase 1: compute all label positions in screen space (events + era ticks).
- * Phase 2: run unified screen-space de-collision across ALL labels.
- * Phase 3: draw era markers, then events — both using adjusted positions.
+ * Phase 2: draw every label at its provisional Y, collecting a ref per text
+ *          element (key → textEl + optional leader line + baseline Y).
+ * Phase 3: measure each rendered text's getBBox() and run height-aware
+ *          de-collision over the actual bounding boxes.
+ * Phase 4: apply the resulting shifts to text baselines and leader-line ends.
  *
  * @param {SVGSVGElement} svg
  * @param {number} vw - viewport width (screen pixels)
@@ -101,59 +104,42 @@ export function drawOverlay(svg, vw, vh, events, hiddenCategories) {
   // 1. Helix guide line (subtle)
   drawHelixGuide(g);
 
-  // ── Phase 1: Compute all label positions in screen space ──
+  // ── Phase 1: Compute positions in screen space ─────────────
 
-  // 1a. Era marker screen positions
   const eraScreen = computeEraScreenPositions();
-
-  // 1b. Event placement computation (filtering, positioning, track assignment)
   const eventData = computeEventPlacements(events, hiddenCategories);
 
-  // 1c. Build unified label entry list for de-collision
-  const labelEntries = [];
+  // ── Phase 2: Draw at provisional Y, collecting text refs ───
+  // Each ref links a rendered <text> (and its leader line, for event
+  // labels) to its key + baseline screenY, so the measured-height
+  // de-collision pass can nudge it down without redrawing.
 
-  // Event labels
-  for (let i = 0; i < eventData.positioned.length; i++) {
-    const e = eventData.positioned[i];
-    const pl = eventData.placements[i];
-    if (!pl || pl.clusterSize === 0) continue; // absorbed into cluster
+  /** @type {Array<{key:string, screenX:number, screenY:number, textEl:SVGTextElement, lineEl:SVGPolylineElement|null}>} */
+  const refs = [];
+  drawEraMarkers(g, eraScreen, refs);
 
-    const anchor = toScreen(e.anchorX, e.anchorY);
-    const labelY = pl.labelY != null ? toScreen(e.anchorX, pl.labelY).y : anchor.y;
-    const labelXDir = pl.side === "left" ? -1 : 1;
-    const trackOffset = LABEL_OFFSET_X + pl.track * 20;
-    const labelX = anchor.x + labelXDir * trackOffset;
-
-    labelEntries.push({
-      screenX: labelX,
-      screenY: labelY + 4,
-      key: `event:${i}`,
-    });
-  }
-
-  // Era tick labels
-  for (let i = 0; i < eraScreen.length; i++) {
-    labelEntries.push({
-      screenX: eraScreen[i].labelScreenX,
-      screenY: eraScreen[i].labelScreenY,
-      key: `era:${i}`,
-    });
-  }
-
-  // ── Phase 2: Unified screen-space de-collision ────────────
-
-  const adjustedYs = decolideAllLabels(labelEntries, vw / 2);
-
-  // ── Phase 3: Draw with adjusted positions ────────────────
-
-  // 3a. Era markers (ticks at original anchor, labels at adjusted Y)
-  drawEraMarkersAdjusted(g, eraScreen, adjustedYs);
-
-  // 3b. Event markers + leader lines + labels
   const anchorList = [];
   if (eventData.positioned.length > 0) {
-    drawEventsAdjusted(g, eventData.positioned, eventData.placements, anchorList, adjustedYs);
+    drawEvents(g, eventData.positioned, eventData.placements, anchorList, refs);
   }
+
+  // ── Phase 3: measure boxes, de-collide by real height ──────
+
+  const boxes = refs.map((r) => {
+    const box = r.textEl.getBBox();
+    return {
+      key: r.key,
+      left: box.x,
+      right: box.x + box.width,
+      top: box.y,
+      bottom: box.y + box.height,
+    };
+  });
+  const shifts = decolideAllLabels(boxes);
+
+  // ── Phase 4: apply shifts to text baselines + leader lines ─
+
+  applyLabelShifts(refs, shifts);
 
   // Store on window for keyboard tooltip access
   window.__lastAnchors = anchorList;
@@ -254,18 +240,18 @@ function drawHelixGuide(g) {
 
 /**
  * Draw era/millennium tick marks at their original anchor positions,
- * and label text at de-collided screen Y positions.
+ * and label text at its provisional screen Y. The label text is measured
+ * and de-collided (height-aware) after all drawing; the tick stays put.
  *
  * @param {SVGGElement} g
  * @param {Array<{year:number, label:string, anchorX:number, anchorY:number, labelScreenX:number, labelScreenY:number}>} eraScreen
- * @param {Map<string, number>} adjustedYs - keyed by "era:{i}"
+ * @param {Array} refs - output: pushed label refs for the de-collision pass
  */
-function drawEraMarkersAdjusted(g, eraScreen, adjustedYs) {
+function drawEraMarkers(g, eraScreen, refs) {
   for (let i = 0; i < eraScreen.length; i++) {
     const era = eraScreen[i];
-    const adjustedY = adjustedYs.get(`era:${i}`) ?? era.labelScreenY;
 
-    // Tick mark at original anchor position
+    // Tick mark at original anchor position (does not move)
     const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
     tick.setAttribute("x1", era.anchorX - 4);
     tick.setAttribute("y1", era.anchorY);
@@ -277,32 +263,41 @@ function drawEraMarkersAdjusted(g, eraScreen, adjustedYs) {
     tick.setAttribute("pointer-events", "none");
     g.appendChild(tick);
 
-    // Label at de-collided Y position
+    // Label at provisional Y (measured + de-collided after all drawing)
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     text.setAttribute("x", era.labelScreenX);
-    text.setAttribute("y", adjustedY);
+    text.setAttribute("y", era.labelScreenY);
     text.setAttribute("fill", "#8b9a8b");
     text.setAttribute("font-family", "monospace");
     text.setAttribute("font-size", "9");
     text.setAttribute("opacity", "0.6");
     text.setAttribute("pointer-events", "none");
+    text.setAttribute("data-label-key", `era:${i}`);
     text.textContent = era.label;
     g.appendChild(text);
+
+    refs.push({
+      key: `era:${i}`,
+      screenX: era.labelScreenX,
+      screenY: era.labelScreenY,
+      textEl: text,
+      lineEl: null,
+    });
   }
 }
 
 /**
  * Draw event markers with leader lines and labels.
- * Leader lines terminate at the de-collided label position.
+ * Leader lines terminate at the label position (de-collided later).
  * Emits {event, sx, sy} for each visible event anchor.
  *
  * @param {SVGGElement} g
  * @param {Object[]} positioned - events with anchorX, anchorY, depth, plus event fields
  * @param {import("./labels.js").LabelPlacement[]} placements - track assignments
  * @param {Object[]} anchorList - output: filled with {event, sx, sy}
- * @param {Map<string, number>} adjustedYs - keyed by "event:{i}"
+ * @param {Array} refs - output: pushed label refs for the de-collision pass
  */
-function drawEventsAdjusted(g, positioned, placements, anchorList, adjustedYs) {
+function drawEvents(g, positioned, placements, anchorList, refs) {
   for (let i = 0; i < positioned.length; i++) {
     const e = positioned[i];
     const pl = placements[i];
@@ -316,23 +311,20 @@ function drawEventsAdjusted(g, positioned, placements, anchorList, adjustedYs) {
     // Emit anchor for hover
     anchorList.push({ event: e, sx: anchor.x, sy: anchor.y });
 
-    // Label position — use de-collided Y from unified pass
+    // Label position — provisional baseline Y (scene-space labelY),
+    // de-collided height-aware after all drawing
     const labelXDir = pl.side === "left" ? -1 : 1;
     const trackOffset = LABEL_OFFSET_X + pl.track * 20;
     const labelX = anchor.x + labelXDir * trackOffset;
 
-    // Compute original screen Y (from the scene-space labelY), then apply
-    // the screen-space adjustment delta. This preserves the scene-space
-    // de-collision stagger while also incorporating the unified pass.
-    const origScreenY = pl.labelY != null
+    const labelY = pl.labelY != null
       ? toScreen(e.anchorX, pl.labelY).y + 4
       : anchor.y + 4;
-    const labelY = adjustedYs.get(`event:${i}`) ?? origScreenY;
 
     // Elbow point (midway in X, same Y as anchor)
     const elbowX = anchor.x + labelXDir * LABEL_OFFSET_X * 0.6;
 
-    // Leader line — terminates at adjusted label position
+    // Leader line — provisional end point (shifted later)
     const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
     const pts = `${anchor.x},${anchor.y} ${elbowX},${anchor.y} ${labelX},${labelY}`;
     line.setAttribute("points", pts);
@@ -343,6 +335,7 @@ function drawEventsAdjusted(g, positioned, placements, anchorList, adjustedYs) {
     line.setAttribute("pointer-events", "none");
     line.setAttribute("data-event-id", e.id || "");
     line.setAttribute("data-category", e.category || "");
+    line.setAttribute("data-label-key", `event:${i}`);
     g.appendChild(line);
 
     // Event marker (small circle at anchor) — keyboard-focusable
@@ -361,7 +354,7 @@ function drawEventsAdjusted(g, positioned, placements, anchorList, adjustedYs) {
     circ.setAttribute("data-category", e.category || "");
     g.appendChild(circ);
 
-    // Label text at de-collided Y position
+    // Label text at provisional Y (measured + de-collided after all drawing)
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     const textAnchor = pl.side === "left" ? "end" : "start";
     const tx = pl.side === "left" ? labelX - 4 : labelX + 4;
@@ -376,6 +369,7 @@ function drawEventsAdjusted(g, positioned, placements, anchorList, adjustedYs) {
     text.setAttribute("pointer-events", "none");
     text.setAttribute("data-event-id", e.id || "");
     text.setAttribute("data-category", e.category || "");
+    text.setAttribute("data-label-key", `event:${i}`);
 
     if (pl.clustered && pl.clusterSize > 1) {
       text.textContent = `+${pl.clusterSize} more`;
@@ -389,5 +383,37 @@ function drawEventsAdjusted(g, positioned, placements, anchorList, adjustedYs) {
     }
 
     g.appendChild(text);
+
+    refs.push({
+      key: `event:${i}`,
+      screenX: labelX,
+      screenY: labelY,
+      textEl: text,
+      lineEl: line,
+    });
+  }
+}
+
+/**
+ * Apply the height-aware de-collision shifts to each text baseline and,
+ * for event labels, to the end point of its leader line.
+ *
+ * @param {Array<{key:string, screenY:number, textEl:SVGTextElement, lineEl:SVGPolylineElement|null}>} refs
+ * @param {Map<string, number>} shifts - vertical shift (px) per key
+ */
+function applyLabelShifts(refs, shifts) {
+  for (const r of refs) {
+    const shift = shifts.get(r.key) ?? 0;
+    if (shift === 0) continue;
+
+    r.textEl.setAttribute("y", String(r.screenY + shift));
+
+    if (r.lineEl) {
+      const points = r.lineEl.getAttribute("points").trim().split(/\s+/);
+      const last = points[points.length - 1].split(",");
+      last[1] = String(r.screenY + shift);
+      points[points.length - 1] = last.join(",");
+      r.lineEl.setAttribute("points", points.join(" "));
+    }
   }
 }
