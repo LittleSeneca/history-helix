@@ -229,6 +229,54 @@ export function decolideLabels(placements, events) {
 }
 
 /**
+ * Screen-space unified de-collision for all rendered labels.
+ * Covers event labels AND era/millennium ticks together in one pass.
+ *
+ * Groups labels by screen side (left/right of viewport center), sorts each
+ * group vertically by screenY, and pushes overlapping labels down to maintain
+ * at least MIN_LABEL_GAP pixels of vertical separation on screen.
+ *
+ * @param {Array<{screenX: number, screenY: number, key: string}>} entries
+ *   Each entry represents one text element:
+ *   - screenX: text x position in screen pixels
+ *   - screenY: text y (baseline) position in screen pixels
+ *   - key: unique identifier (e.g., "event:0", "era:5")
+ * @param {number} vpCenterX - viewport width / 2 (screen pixels)
+ * @returns {Map<string, number>} adjusted screenY value for each entry key
+ */
+export function decolideAllLabels(entries, vpCenterX) {
+  const left = [];
+  const right = [];
+
+  for (const e of entries) {
+    if (e.screenX < vpCenterX) {
+      left.push(e);
+    } else {
+      right.push(e);
+    }
+  }
+
+  const adjusted = new Map();
+
+  for (const group of [left, right]) {
+    // Sort by screenY ascending
+    group.sort((a, b) => a.screenY - b.screenY);
+
+    for (let i = 0; i < group.length; i++) {
+      let sy = group[i].screenY;
+      if (i > 0) {
+        const prevAdjusted = adjusted.get(group[i - 1].key);
+        const minY = prevAdjusted + MIN_LABEL_GAP;
+        if (sy < minY) sy = minY;
+      }
+      adjusted.set(group[i].key, sy);
+    }
+  }
+
+  return adjusted;
+}
+
+/**
  * Return the maximum track number used (for layout calculations).
  * @param {LabelPlacement[]} placements
  * @returns {number}
