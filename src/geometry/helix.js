@@ -8,7 +8,7 @@ export const tMin = -10000;
 export const tMax = 2100;
 
 // ── Coil dimensions (scene pixels) ─────────────────────────
-const R = 150; // coil radius
+export const R = 150; // coil radius
 const LEN = R * TURNS * 0.45; // total coil height in local space before rotation
 const LEAN_RAD = (LEAN_DEG * Math.PI) / 180;
 const THETA = 2 * Math.PI * TURNS;
