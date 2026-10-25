@@ -309,10 +309,10 @@ async function init() {
       `[history-helix] people strands: ${strands.length}, filtered out: ${filtered}`,
     );
 
-    // Build batched Path2Ds
+    // Build batched Path2Ds (one per palette entry)
     strandBatches = buildStrandBatches(strands);
     console.log(
-      `[history-helix] batches: ${strandBatches.size} eras → ${strandBatches.size} stroke() calls`,
+      `[history-helix] batches: ${strandBatches.size} palette entries → ${strandBatches.size} stroke() calls`,
     );
 
     // Pass strand data to hover system for picking
