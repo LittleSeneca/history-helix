@@ -1,21 +1,23 @@
-// Pastel palette — deterministic per-life colors (C-2)
+// Pastel palette — deterministic per-life colors (C-2, C-4)
 //
 // Replaces era-based strand coloring with a soft pastel mosaic:
 // every life gets its own color derived from a deterministic hash
 // of that person's identity (name + birth year).
 //
-// Palette: 64 pastel colors, HSL L ≥ 80%, S ≤ 45%.
+// Palette: 64 pastel colors, HSL L ≥ 82%, S 59–67%.
 // Hues are evenly spaced around 360° with alternating S/L bands.
+// C-4: raised chroma from mean S=30% to mean S=63% so rendered strands
+// read as actual color after alpha compositing over dark background.
 
 const PASTEL = [
-  "#d8c4c4", "#e1cdcb", "#e9d6d2", "#e2c5ba", "#ded4ce", "#e6ddd4", "#dfd0be", "#e6dbc5",
-  "#e4e1d7", "#dbd7c1", "#e4e2c8", "#eaebd0", "#d5d8c4", "#dce1cb", "#e2e9d2", "#d2e2ba",
-  "#d6dece", "#dce6d4", "#c8dfbe", "#cce6c5", "#d8e4d7", "#c2dbc1", "#c8e4ca", "#d0ebd4",
-  "#c4d8c9", "#cbe1d2", "#d2e9dc", "#bae2cf", "#ceded8", "#d4e6e1", "#bedfd8", "#c5e6e3",
-  "#d7e4e4", "#c1d9db", "#c8dee4", "#d0e3eb", "#c4d0d8", "#cbd6e1", "#d2dce9", "#bac8e2",
-  "#ced2de", "#d4d7e6", "#bec0df", "#c6c5e6", "#d8d7e4", "#c7c1db", "#d0c8e4", "#dbd0eb",
-  "#cec4d8", "#d8cbe1", "#e2d2e9", "#d9bae2", "#dccede", "#e6d4e6", "#dfbedc", "#e6c5e1",
-  "#e4d7e1", "#dbc1d2", "#e4c8d7", "#ebd0dd", "#d8c4cc", "#e1cbd1", "#e9d2d6", "#e2babe",
+  "#edb6b6", "#f0c1bc", "#f3ccc3", "#efc8b9", "#eccab6", "#f2d7c0", "#efd7b9", "#eddab6",
+  "#eddfb6", "#f0e8bc", "#f3f0c3", "#edefb9", "#e5ecb6", "#e7f2c0", "#deefb9", "#d6edb6",
+  "#d1edb6", "#d1f0bc", "#d2f3c3", "#c5efb9", "#bdecb6", "#c1f2c0", "#b9efbc", "#b6edbe",
+  "#b6edc3", "#bcf0ce", "#c3f3d8", "#b9efd5", "#b6ecd8", "#c0f2e4", "#b9efe4", "#b6ede7",
+  "#b6eded", "#bcebf0", "#c3eaf3", "#b9dfef", "#b6d8ec", "#c0daf2", "#b9d0ef", "#b6c8ed",
+  "#b6c3ed", "#bcc4f0", "#c3c6f3", "#bab9ef", "#bdb6ec", "#cbc0f2", "#cab9ef", "#ccb6ed",
+  "#d1b6ed", "#dbbcf0", "#e4c3f3", "#e3b9ef", "#e5b6ec", "#f0c0f2", "#efb9eb", "#edb6e4",
+  "#edb6df", "#f0bcde", "#f3c3de", "#efb9d2", "#ecb6ca", "#f2c0ce", "#efb9c3", "#edb6bb",
 ];
 
 const SIZE = PASTEL.length; // 64
@@ -75,7 +77,7 @@ export function colorFor(person) {
 
 /**
  * The full palette array (64 #rrggbb entries).
- * All entries: HSL L ≥ 80%, S ≤ 45%.
+ * C-4: HSL L 82–86%, S 59–67% — raised from L≥80%/S≤45% to fix rendered chroma.
  */
 export const PALETTE = PASTEL;
 export const PALETTE_SIZE = SIZE;

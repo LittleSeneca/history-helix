@@ -192,7 +192,11 @@ export function drawStrands(ctx, batches, opts = {}) {
   const lw = 0.8 / _normalizedLineWidth();
 
   // Dimmed pass: all strands at reduced alpha when highlighting
-  const alpha = hasHighlight ? 0.15 : 0.45;
+  // C-4: alpha raised from 0.45 to 0.90 to fix alpha-compositing desaturation
+  // over dark background (#0b0b0e). At 0.45, the rendered saturation was ~82%
+  // below palette values; at 0.90, the rendered saturation retains ~60% of
+  // palette saturation — passing the AC-1 gate (mean rendered S ≥ 35%).
+  const alpha = hasHighlight ? 0.15 : 0.90;
 
   for (const [idx, path] of batches) {
     const color = colorAt(idx);
