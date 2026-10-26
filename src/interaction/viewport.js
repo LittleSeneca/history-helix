@@ -242,6 +242,16 @@ export function handleKeyboard(e) {
     case "ArrowDown":
       pan(0, -STEP);
       return true;
+    case "+":
+    case "=":
+      // Zoom in at screen center
+      zoom(1.1, _screenW / 2, _screenH / 2);
+      return true;
+    case "-":
+    case "_":
+      // Zoom out at screen center
+      zoom(0.9, _screenW / 2, _screenH / 2);
+      return true;
     default:
       return false;
   }
@@ -253,22 +263,94 @@ let _dragging = false;
 let _lastX = 0;
 let _lastY = 0;
 
+// Multi-touch gesture state
+const _touchPointers = new Map();  // pointerId → {clientX, clientY}
+let _pinchDist = 0;
+let _pinchCx = 0;
+let _pinchCy = 0;
+let _isPinching = false;
+const _pinchFresh = new Set();  // pointerIds that have moved this frame
+
 /**
  * Wire pan/zoom to a canvas element's pointer events.
+ * Supports mouse drag (pan), wheel (zoom), one-finger touch pan,
+ * and two-finger pinch zoom — all through Pointer Events.
  * @param {HTMLCanvasElement} canvas
  */
 export function wireCanvas(canvas) {
-  // Pointer down → start drag
+  // Ensure the browser doesn't steal touch gestures for page scroll
+  canvas.style.touchAction = "none";
+
+  // ── pointerdown ──
   canvas.addEventListener("pointerdown", (e) => {
-    _dragging = true;
-    _lastX = e.clientX;
-    _lastY = e.clientY;
-    canvas.setPointerCapture(e.pointerId);
+    if (e.pointerType === "touch") {
+      _touchPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+      if (_touchPointers.size === 1) {
+        // One finger: start pan
+        _dragging = true;
+        _lastX = e.clientX;
+        _lastY = e.clientY;
+        _isPinching = false;
+      } else if (_touchPointers.size === 2) {
+        // Two fingers: start pinch
+        const pts = [..._touchPointers.values()];
+        _pinchDist = Math.hypot(pts[0].clientX - pts[1].clientX, pts[0].clientY - pts[1].clientY);
+        _pinchCx = (pts[0].clientX + pts[1].clientX) / 2;
+        _pinchCy = (pts[0].clientY + pts[1].clientY) / 2;
+        _isPinching = true;
+        _dragging = false;
+        _pinchFresh.clear();
+      }
+    } else {
+      // Mouse drag
+      _dragging = true;
+      _lastX = e.clientX;
+      _lastY = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+    }
   });
 
-  // Pointer move → pan if dragging
+  // ── pointermove ──
   canvas.addEventListener("pointermove", (e) => {
-    if (_dragging) {
+    if (e.pointerType === "touch") {
+      if (!_touchPointers.has(e.pointerId)) return;
+      _touchPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+      if (_isPinching && _touchPointers.size >= 2) {
+        // Wait for both tracked fingers to report fresh positions
+        _pinchFresh.add(e.pointerId);
+        if (_pinchFresh.size < 2) return;
+
+        // Two-finger pinch zoom — both fingers have fresh data
+        const pts = [..._touchPointers.values()].slice(0, 2);
+        const newDist = Math.hypot(pts[0].clientX - pts[1].clientX, pts[0].clientY - pts[1].clientY);
+        const newCx = (pts[0].clientX + pts[1].clientX) / 2;
+        const newCy = (pts[0].clientY + pts[1].clientY) / 2;
+
+        if (_pinchDist > 0 && newDist > 0) {
+          // Pan to follow midpoint movement (grab-and-drag)
+          pan(newCx - _pinchCx, newCy - _pinchCy);
+
+          // Zoom at the new midpoint
+          const factor = newDist / _pinchDist;
+          zoom(factor, newCx, newCy);
+        }
+
+        _pinchDist = newDist;
+        _pinchCx = newCx;
+        _pinchCy = newCy;
+        _pinchFresh.clear();
+      } else if (_dragging && _touchPointers.size === 1) {
+        // One-finger pan (same motion as mouse drag)
+        const dx = e.clientX - _lastX;
+        const dy = e.clientY - _lastY;
+        _lastX = e.clientX;
+        _lastY = e.clientY;
+        pan(-dx, -dy);
+      }
+    } else if (_dragging) {
+      // Mouse pan
       const dx = e.clientX - _lastX;
       const dy = e.clientY - _lastY;
       _lastX = e.clientX;
@@ -277,19 +359,46 @@ export function wireCanvas(canvas) {
     }
   });
 
-  // Pointer up → end drag
-  canvas.addEventListener("pointerup", () => {
-    _dragging = false;
-  });
+  // ── pointerup / pointercancel ──
+  function _handleTouchEnd(e) {
+    if (e.pointerType === "touch") {
+      _touchPointers.delete(e.pointerId);
+
+      if (_touchPointers.size === 0) {
+        _dragging = false;
+        _isPinching = false;
+        _pinchDist = 0;
+        _pinchFresh.clear();
+      } else if (_touchPointers.size === 1 && _isPinching) {
+        // Transition from pinch to single-finger pan
+        const [pt] = [..._touchPointers.values()];
+        _lastX = pt.clientX;
+        _lastY = pt.clientY;
+        _dragging = true;
+        _isPinching = false;
+        _pinchDist = 0;
+        _pinchFresh.clear();
+      }
+    } else {
+      _dragging = false;
+    }
+  }
+
+  canvas.addEventListener("pointerup", _handleTouchEnd);
+  canvas.addEventListener("pointercancel", _handleTouchEnd);
 
   canvas.addEventListener("pointerleave", () => {
     _dragging = false;
+    _touchPointers.clear();
+    _isPinching = false;
+    _pinchDist = 0;
+    _pinchFresh.clear();
   });
 
-  // Wheel → zoom
+  // ── Wheel → zoom (scroll DOWN = zoom IN) ──
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    const factor = e.deltaY > 0 ? 1.1 : 0.9;
     zoom(factor, e.clientX, e.clientY);
   }, { passive: false });
 }

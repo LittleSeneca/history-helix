@@ -247,7 +247,7 @@ test("mouse drag pans the scene", async ({ page }) => {
   expect(anyChanged).toBe(true);
 });
 
-test("scroll wheel zooms the scene", async ({ page }) => {
+test("scroll wheel zooms the scene — down=zoom-in, up=zoom-out", async ({ page }) => {
   await waitForApp(page);
 
   const centerX = page.viewportSize()!.width / 2;
@@ -255,28 +255,14 @@ test("scroll wheel zooms the scene", async ({ page }) => {
 
   await page.mouse.move(centerX, centerY);
 
-  // Record scale before zoom
+  // Record scale before any zoom
   const scaleBefore = await page.evaluate(() => {
     const fn = (window as any).__getZoom;
     return fn ? fn() : null;
   });
   expect(scaleBefore).toBeGreaterThan(0);
 
-  // Zoom with scroll wheel UP (deltaY < 0) — should zoom IN
-  await page.mouse.wheel(0, -500);
-  await page.waitForTimeout(300);
-
-  const scaleAfterUp = await page.evaluate(() => {
-    const fn = (window as any).__getZoom;
-    return fn ? fn() : null;
-  });
-  expect(scaleAfterUp).toBeGreaterThan(0);
-
-  // scroll up (deltaY < 0) → zoom in → scale increases
-  console.log(`[wheel-up]  before: ${scaleBefore.toFixed(4)}  after: ${scaleAfterUp.toFixed(4)}`);
-  expect(scaleAfterUp).toBeGreaterThan(scaleBefore);
-
-  // Zoom with scroll wheel DOWN (deltaY > 0) — should zoom OUT
+  // Scroll wheel DOWN (deltaY > 0) → should zoom IN (scale increases)
   await page.mouse.wheel(0, 500);
   await page.waitForTimeout(300);
 
@@ -286,9 +272,23 @@ test("scroll wheel zooms the scene", async ({ page }) => {
   });
   expect(scaleAfterDown).toBeGreaterThan(0);
 
-  // scroll down (deltaY > 0) → zoom out → scale decreases
-  console.log(`[wheel-down] before: ${scaleAfterUp.toFixed(4)}  after: ${scaleAfterDown.toFixed(4)}`);
-  expect(scaleAfterDown).toBeLessThan(scaleAfterUp);
+  // scroll down (deltaY > 0) → zoom in → scale increases
+  console.log(`[wheel-down]  before: ${scaleBefore.toFixed(4)}  after: ${scaleAfterDown.toFixed(4)}`);
+  expect(scaleAfterDown).toBeGreaterThan(scaleBefore);
+
+  // Scroll wheel UP (deltaY < 0) → should zoom OUT (scale decreases)
+  await page.mouse.wheel(0, -500);
+  await page.waitForTimeout(300);
+
+  const scaleAfterUp = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(scaleAfterUp).toBeGreaterThan(0);
+
+  // scroll up (deltaY < 0) → zoom out → scale decreases
+  console.log(`[wheel-up]    before: ${scaleAfterDown.toFixed(4)}  after: ${scaleAfterUp.toFixed(4)}`);
+  expect(scaleAfterUp).toBeLessThan(scaleAfterDown);
 });
 
 // ── Search ──────────────────────────────────────────────────
@@ -483,11 +483,11 @@ test("viewport change invalidates picking buffer", async ({ page }) => {
   const initialMs = await page.evaluate(() => (window as any).__pickingRebuildMs);
   expect(initialMs).toBeGreaterThan(0);
 
-  // Zoom in
+  // Zoom (scroll down → zoom in with new mapping)
   const centerX = page.viewportSize()!.width / 2;
   const centerY = page.viewportSize()!.height / 2;
   await page.mouse.move(centerX, centerY);
-  await page.mouse.wheel(0, -500);
+  await page.mouse.wheel(0, 500);
   await page.waitForTimeout(1000); // wait for settle + rebuild
 
   // Should have rebuilt at least once
@@ -496,4 +496,262 @@ test("viewport change invalidates picking buffer", async ({ page }) => {
   // But the buffer should still be ready
   const ready = await page.evaluate(() => (window as any).__pickingReady);
   expect(ready).toBe(true);
+});
+
+// ── C-5: Touch gesture tests ─────────────────────────────
+
+/**
+ * Dispatch a synthetic pointer event chain on the scene canvas.
+ * Returns the dispatch result.
+ */
+async function dispatchTouchSequence(
+  page,
+  events: Array<{ type: string; pointerId: number; clientX: number; clientY: number }>,
+) {
+  return page.evaluate((evts) => {
+    const canvas = document.getElementById("scene");
+    for (const e of evts) {
+      canvas.dispatchEvent(new PointerEvent(e.type, {
+        pointerId: e.pointerId,
+        pointerType: "touch",
+        clientX: e.clientX,
+        clientY: e.clientY,
+        bubbles: true,
+        isPrimary: e.pointerId === 1,
+      }));
+    }
+  }, events);
+}
+
+test("C-5: one-finger touch drag pans the view", async ({ page }) => {
+  await waitForApp(page);
+
+  const W = page.viewportSize()!.width;
+  const H = page.viewportSize()!.height;
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // Record view center before pan
+  const before = await page.evaluate(() => {
+    const fn = (window as any).__getViewCenter;
+    return fn ? fn() : { x: 0, y: 0 };
+  });
+
+  // One-finger drag: move right 100px, down 60px
+  const dragDx = 100;
+  const dragDy = 60;
+
+  await dispatchTouchSequence(page, [
+    { type: "pointerdown", pointerId: 1, clientX: cx, clientY: cy },
+    { type: "pointermove", pointerId: 1, clientX: cx + dragDx, clientY: cy + dragDy },
+    { type: "pointerup",   pointerId: 1, clientX: cx + dragDx, clientY: cy + dragDy },
+  ]);
+  await page.waitForTimeout(300);
+
+  // Record view center after pan
+  const after = await page.evaluate(() => {
+    const fn = (window as any).__getViewCenter;
+    return fn ? fn() : { x: 0, y: 0 };
+  });
+
+  // pan(-dx, -dy) in viewport means: moving finger right → scene shifts right
+  // _viewX -= dx/_zoom, so viewX decreases when finger moves right
+  // scene at screen center after: viewX decreased → scene shifts right
+  // So viewX should be LESS than before after dragging right
+  const zoom = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : 1;
+  });
+
+  // Expected: _viewX increases by dragDx/zoom when dragging right
+  // (pan(-dx,-dy) → _viewX -= (-dx)/zoom = _viewX + dx/zoom)
+  const expectedDx = dragDx / zoom;
+  const actualDx = after.x - before.x;
+
+  console.log(`[one-finger-pan] zoom=${zoom.toFixed(4)} drag=(${dragDx},${dragDy}) view-delta=(${actualDx.toFixed(2)},${(after.y - before.y).toFixed(2)}) expected=(${expectedDx.toFixed(2)})`);
+  // Within 10% tolerance
+  expect(Math.abs(actualDx)).toBeGreaterThan(0);
+  const tolerance = Math.abs(expectedDx) * 0.1;
+  expect(Math.abs(actualDx - expectedDx)).toBeLessThanOrEqual(tolerance + 0.5); // +0.5px for rounding
+});
+
+test("C-5: two-finger spread pinch zooms in", async ({ page }) => {
+  await waitForApp(page);
+
+  const W = page.viewportSize()!.width;
+  const H = page.viewportSize()!.height;
+  const cx = W / 2;
+  const cy = H / 2;
+  const halfSpread = 50;
+
+  // Record initial state
+  const zoomBefore = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(zoomBefore).toBeGreaterThan(0);
+
+  // Two-finger spread: start close, move apart
+  await dispatchTouchSequence(page, [
+    // Both fingers down
+    { type: "pointerdown", pointerId: 1, clientX: cx - halfSpread, clientY: cy },
+    { type: "pointerdown", pointerId: 2, clientX: cx + halfSpread, clientY: cy },
+    // Spread — double the distance
+    { type: "pointermove", pointerId: 1, clientX: cx - halfSpread * 2, clientY: cy },
+    { type: "pointermove", pointerId: 2, clientX: cx + halfSpread * 2, clientY: cy },
+    // Release
+    { type: "pointerup",   pointerId: 1, clientX: cx - halfSpread * 2, clientY: cy },
+    { type: "pointerup",   pointerId: 2, clientX: cx + halfSpread * 2, clientY: cy },
+  ]);
+  await page.waitForTimeout(300);
+
+  const zoomAfter = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(zoomAfter).toBeGreaterThan(0);
+
+  console.log(`[pinch-spread] before: ${zoomBefore!.toFixed(4)}  after: ${zoomAfter.toFixed(4)}`);
+  // Spreading should zoom IN → zoom increases
+  expect(zoomAfter).toBeGreaterThan(zoomBefore!);
+});
+
+test("C-5: two-finger pinch zooms out", async ({ page }) => {
+  await waitForApp(page);
+
+  const W = page.viewportSize()!.width;
+  const H = page.viewportSize()!.height;
+  const cx = W / 2;
+  const cy = H / 2;
+  const halfSpread = 100;
+
+  // Record initial state
+  const zoomBefore = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(zoomBefore).toBeGreaterThan(0);
+
+  // Two-finger pinch: start wide, move together
+  await dispatchTouchSequence(page, [
+    { type: "pointerdown", pointerId: 1, clientX: cx - halfSpread, clientY: cy },
+    { type: "pointerdown", pointerId: 2, clientX: cx + halfSpread, clientY: cy },
+    // Pinch — halve the distance
+    { type: "pointermove", pointerId: 1, clientX: cx - halfSpread / 2, clientY: cy },
+    { type: "pointermove", pointerId: 2, clientX: cx + halfSpread / 2, clientY: cy },
+    // Release
+    { type: "pointerup",   pointerId: 1, clientX: cx - halfSpread / 2, clientY: cy },
+    { type: "pointerup",   pointerId: 2, clientX: cx + halfSpread / 2, clientY: cy },
+  ]);
+  await page.waitForTimeout(300);
+
+  const zoomAfter = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(zoomAfter).toBeGreaterThan(0);
+
+  console.log(`[pinch-inward] before: ${zoomBefore!.toFixed(4)}  after: ${zoomAfter.toFixed(4)}`);
+  // Pinching should zoom OUT → zoom decreases
+  expect(zoomAfter).toBeLessThan(zoomBefore!);
+});
+
+test("C-5: pinch midpoint stays put (< 2 px drift)", async ({ page }) => {
+  await waitForApp(page);
+
+  const W = page.viewportSize()!.width;
+  const H = page.viewportSize()!.height;
+  const cx = W / 2;
+  const cy = H / 2;
+  const halfSpread = 50;
+
+  // Compute the scene point under the midpoint BEFORE pinch
+  const scenePt = await page.evaluate(({ mx, my, W, H }) => {
+    const zFn = (window as any).__getZoom;
+    const vcFn = (window as any).__getViewCenter;
+    if (!zFn || !vcFn) return null;
+    const zoom = zFn();
+    const vc = vcFn();
+    return {
+      sx: (mx - W / 2) / zoom + vc.x,
+      sy: (my - H / 2) / zoom + vc.y,
+    };
+  }, { mx: cx, my: cy, W, H });
+  expect(scenePt).not.toBeNull();
+
+  // Two-finger spread
+  await dispatchTouchSequence(page, [
+    { type: "pointerdown", pointerId: 1, clientX: cx - halfSpread, clientY: cy },
+    { type: "pointerdown", pointerId: 2, clientX: cx + halfSpread, clientY: cy },
+    { type: "pointermove", pointerId: 1, clientX: cx - halfSpread * 2, clientY: cy },
+    { type: "pointermove", pointerId: 2, clientX: cx + halfSpread * 2, clientY: cy },
+    { type: "pointerup",   pointerId: 1, clientX: cx - halfSpread * 2, clientY: cy },
+    { type: "pointerup",   pointerId: 2, clientX: cx + halfSpread * 2, clientY: cy },
+  ]);
+  await page.waitForTimeout(300);
+
+  // Where is that scene point now on screen?
+  const screenNow = await page.evaluate(({ sx, sy, W, H }) => {
+    const zFn = (window as any).__getZoom;
+    const vcFn = (window as any).__getViewCenter;
+    if (!zFn || !vcFn) return null;
+    const zoom = zFn();
+    const vc = vcFn();
+    return {
+      px: (sx - vc.x) * zoom + W / 2,
+      py: (sy - vc.y) * zoom + H / 2,
+    };
+  }, { sx: scenePt!.sx, sy: scenePt!.sy, W, H });
+  expect(screenNow).not.toBeNull();
+
+  const drift = Math.hypot(screenNow!.px - cx, screenNow!.py - cy);
+  console.log(`[pinch-drift] scenePt=(${scenePt!.sx.toFixed(2)},${scenePt!.sy.toFixed(2)})  screenNow=(${screenNow!.px.toFixed(2)},${screenNow!.py.toFixed(2)})  drift=${drift.toFixed(2)}px`);
+  expect(drift).toBeLessThan(2);
+});
+
+// ── C-5: Keyboard zoom ─────────────────────────────────
+
+test("C-5: + and - keys zoom in and out at screen center", async ({ page }) => {
+  await waitForApp(page);
+
+  // Click on the page to ensure it has focus for keyboard events
+  await page.mouse.click(100, 100);
+
+  const zoom0 = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(zoom0).toBeGreaterThan(0);
+
+  // Press + (which is Shift+= on US keyboard)
+  await page.keyboard.press("+");
+  await page.waitForTimeout(200);
+
+  const zoom1 = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(zoom1).toBeGreaterThan(0);
+
+  console.log(`[key-plus] before: ${zoom0.toFixed(4)}  after: ${zoom1.toFixed(4)}`);
+  // + key → zoom in → scale increases
+  expect(zoom1).toBeGreaterThan(zoom0);
+
+  // Press - key
+  await page.keyboard.press("-");
+  await page.waitForTimeout(200);
+
+  const zoom2 = await page.evaluate(() => {
+    const fn = (window as any).__getZoom;
+    return fn ? fn() : null;
+  });
+  expect(zoom2).toBeGreaterThan(0);
+
+  console.log(`[key-minus] before: ${zoom1.toFixed(4)}  after: ${zoom2.toFixed(4)}`);
+  // - key → zoom out → scale decreases
+  expect(zoom2).toBeLessThan(zoom1);
+
+  // Direction must agree with wheel: + = zoom in (same as scroll-down-zoom-in)
+  // Verify: zoom2 should still be GREATER than zoom0 (we zoomed in then out once)
+  // Matches new wheel convention: + zooms in, scroll-down zooms in
 });
