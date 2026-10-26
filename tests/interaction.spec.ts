@@ -201,50 +201,43 @@ test("category filter toggle hides event markers", async ({ page }) => {
 
 // ── Pan/zoom ────────────────────────────────────────────────
 
-test("mouse drag pans the scene", async ({ page }) => {
+test("mouse drag pans the scene — content follows pointer (direction)", async ({ page }) => {
   await waitForApp(page);
 
-  // Get initial canvas state via pixel sample
-  const beforePixels = await page.evaluate(() => {
-    const c = document.getElementById("scene") as HTMLCanvasElement;
-    const ctx = c.getContext("2d")!;
-    const results: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      const x = 100 + i * 200;
-      const y = 300;
-      const p = ctx.getImageData(x, y, 1, 1).data;
-      results.push(p[0] + p[1] + p[2]);
-    }
-    return results;
-  });
+  const before = await page.evaluate(() => (window as any).__getViewCenter());
+  const zoom = await page.evaluate(() => (window as any).__getZoom());
+  expect(zoom).toBeGreaterThan(0);
 
-  // Drag from center to top-left
+  // Drag from center to top-left (negative dx, negative dy)
   const centerX = page.viewportSize()!.width / 2;
   const centerY = page.viewportSize()!.height / 2;
+  const dragDx = -100;
+  const dragDy = -100;
 
   await page.mouse.move(centerX, centerY);
   await page.mouse.down();
-  await page.mouse.move(centerX - 100, centerY - 100, { steps: 5 });
+  await page.mouse.move(centerX + dragDx, centerY + dragDy, { steps: 5 });
   await page.mouse.up();
   await page.waitForTimeout(300);
 
-  // Sample pixels at same positions — should differ
-  const afterPixels = await page.evaluate(() => {
-    const c = document.getElementById("scene") as HTMLCanvasElement;
-    const ctx = c.getContext("2d")!;
-    const results: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      const x = 100 + i * 200;
-      const y = 300;
-      const p = ctx.getImageData(x, y, 1, 1).data;
-      results.push(p[0] + p[1] + p[2]);
-    }
-    return results;
-  });
+  const after = await page.evaluate(() => (window as any).__getViewCenter());
 
-  // At least one pixel should be different
-  const anyChanged = beforePixels.some((v, i) => v !== afterPixels[i]);
-  expect(anyChanged).toBe(true);
+  // Content follows pointer: drag left → content left → _viewX increases;
+  // drag up → content up → _viewY increases.
+  const actualDx = after.x - before.x;
+  const actualDy = after.y - before.y;
+  const expectedDx = -dragDx / zoom;
+  const expectedDy = -dragDy / zoom;
+
+  console.log(`[mouse-drag] drag=(${dragDx},${dragDy}) view-delta=(${actualDx.toFixed(2)},${actualDy.toFixed(2)}) expected=(${expectedDx.toFixed(2)},${expectedDy.toFixed(2)})`);
+
+  // DIRECTION assertions — a reversed drag FAILS these:
+  expect(actualDx).toBeGreaterThan(0); // dragged left → content left → viewX up
+  expect(actualDy).toBeGreaterThan(0); // dragged up   → content up   → viewY up
+
+  const tol = Math.abs(expectedDx) * 0.1 + 0.5;
+  expect(Math.abs(actualDx - expectedDx)).toBeLessThanOrEqual(tol);
+  expect(Math.abs(actualDy - expectedDy)).toBeLessThanOrEqual(tol);
 });
 
 test("scroll wheel zooms the scene — down=zoom-in, up=zoom-out", async ({ page }) => {
@@ -554,25 +547,27 @@ test("C-5: one-finger touch drag pans the view", async ({ page }) => {
     return fn ? fn() : { x: 0, y: 0 };
   });
 
-  // pan(-dx, -dy) in viewport means: moving finger right → scene shifts right
-  // _viewX -= dx/_zoom, so viewX decreases when finger moves right
-  // scene at screen center after: viewX decreased → scene shifts right
-  // So viewX should be LESS than before after dragging right
+  // Convention (viewport.js pan docstring): pan(dx,dy) moves the CONTENT
+  // by (dx,dy) screen px. Dragging right (+dx) → content moves right →
+  // the view-center scene coordinate _viewX DECREASES by dx/zoom.
   const zoom = await page.evaluate(() => {
     const fn = (window as any).__getZoom;
     return fn ? fn() : 1;
   });
 
-  // Expected: _viewX increases by dragDx/zoom when dragging right
-  // (pan(-dx,-dy) → _viewX -= (-dx)/zoom = _viewX + dx/zoom)
-  const expectedDx = dragDx / zoom;
+  // drag right → content right → _viewX decreases; drag down → _viewY decreases
+  const expectedDx = -dragDx / zoom;
+  const expectedDy = -dragDy / zoom;
   const actualDx = after.x - before.x;
+  const actualDy = after.y - before.y;
 
-  console.log(`[one-finger-pan] zoom=${zoom.toFixed(4)} drag=(${dragDx},${dragDy}) view-delta=(${actualDx.toFixed(2)},${(after.y - before.y).toFixed(2)}) expected=(${expectedDx.toFixed(2)})`);
-  // Within 10% tolerance
-  expect(Math.abs(actualDx)).toBeGreaterThan(0);
+  console.log(`[one-finger-pan] zoom=${zoom.toFixed(4)} drag=(${dragDx},${dragDy}) view-delta=(${actualDx.toFixed(2)},${actualDy.toFixed(2)}) expected=(${expectedDx.toFixed(2)},${expectedDy.toFixed(2)})`);
+  // DIRECTION assertions — a reversed drag FAILS these:
+  expect(actualDx).toBeLessThan(0); // dragging right must NOT move content left
+  expect(actualDy).toBeLessThan(0); // dragging down must NOT move content up
   const tolerance = Math.abs(expectedDx) * 0.1;
   expect(Math.abs(actualDx - expectedDx)).toBeLessThanOrEqual(tolerance + 0.5); // +0.5px for rounding
+  expect(Math.abs(actualDy - expectedDy)).toBeLessThanOrEqual(tolerance + 0.5);
 });
 
 test("C-5: two-finger spread pinch zooms in", async ({ page }) => {
@@ -754,4 +749,114 @@ test("C-5: + and - keys zoom in and out at screen center", async ({ page }) => {
   // Direction must agree with wheel: + = zoom in (same as scroll-down-zoom-in)
   // Verify: zoom2 should still be GREATER than zoom0 (we zoomed in then out once)
   // Matches new wheel convention: + zooms in, scroll-down zooms in
+});
+
+// ── C-7: Pan direction convention (measured) ───────────────
+
+/**
+ * Compute the canvas centre-of-mass of all non-transparent content pixels
+ * (population envelope + spine + strands all move together under pan).
+ * Returns CSS-pixel coordinates. Dragging right → content right → x increases.
+ */
+async function canvasCenterOfMass(page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => {
+    const c = document.getElementById("scene") as HTMLCanvasElement;
+    const ctx = c.getContext("2d")!;
+    const w = c.width;
+    const h = c.height;
+    const data = ctx.getImageData(0, 0, w, h).data;
+    let sumX = 0;
+    let sumY = 0;
+    let count = 0;
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        const a = data[(y * w + x) * 4 + 3];
+        if (a > 0) {
+          sumX += x;
+          sumY += y;
+          count++;
+        }
+      }
+    }
+    const dpr = window.devicePixelRatio || 1;
+    return { x: sumX / count / dpr, y: sumY / count / dpr };
+  });
+}
+
+test("C-7: drag right 120px moves content right ≈120px (centre-of-mass)", async ({ page }) => {
+  await waitForApp(page);
+
+  const before = await canvasCenterOfMass(page);
+  const beforeVC = await page.evaluate(() => (window as any).__getViewCenter());
+  const zoom = await page.evaluate(() => (window as any).__getZoom());
+  const cx = page.viewportSize()!.width / 2;
+  const cy = page.viewportSize()!.height / 2;
+
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 120, cy, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  const after = await canvasCenterOfMass(page);
+  const afterVC = await page.evaluate(() => (window as any).__getViewCenter());
+  const shift = after.x - before.x;
+  console.log(`[drag-right-120] COM.x ${before.x.toFixed(1)} → ${after.x.toFixed(1)}  shift=${shift.toFixed(1)}px  (expect ≈ +120)`);
+  expect(shift).toBeGreaterThan(0); // direction: content moved RIGHT
+
+  // Exact magnitude via view center — content shift = −(view-center shift) * zoom,
+  // immune to the edge-clipping that biases centre-of-mass on large drags.
+  const contentShift = (beforeVC.x - afterVC.x) * zoom;
+  expect(contentShift).toBeGreaterThan(108); // within 10% of +120
+  expect(contentShift).toBeLessThan(132);
+});
+
+test("C-7: drag down 120px moves content down ≈120px (centre-of-mass)", async ({ page }) => {
+  await waitForApp(page);
+
+  const before = await canvasCenterOfMass(page);
+  const beforeVC = await page.evaluate(() => (window as any).__getViewCenter());
+  const zoom = await page.evaluate(() => (window as any).__getZoom());
+  const cx = page.viewportSize()!.width / 2;
+  const cy = page.viewportSize()!.height / 2;
+
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy + 120, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  const after = await canvasCenterOfMass(page);
+  const afterVC = await page.evaluate(() => (window as any).__getViewCenter());
+  const shift = after.y - before.y;
+  console.log(`[drag-down-120] COM.y ${before.y.toFixed(1)} → ${after.y.toFixed(1)}  shift=${shift.toFixed(1)}px  (expect ≈ +120)`);
+  expect(shift).toBeGreaterThan(0); // direction: content moved DOWN
+
+  // Exact magnitude via view center (clipping-immune, see drag-right test).
+  const contentShift = (beforeVC.y - afterVC.y) * zoom;
+  expect(contentShift).toBeGreaterThan(108); // within 10% of +120
+  expect(contentShift).toBeLessThan(132);
+});
+
+test("C-7: ArrowLeft moves content left, ArrowUp moves content up (direction)", async ({ page }) => {
+  await waitForApp(page);
+
+  // Click empty canvas to give the page keyboard focus (not an input)
+  await page.mouse.click(100, 100);
+
+  const before = await page.evaluate(() => (window as any).__getViewCenter());
+
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForTimeout(100);
+  const afterLeft = await page.evaluate(() => (window as any).__getViewCenter());
+  const leftShift = afterLeft.x - before.x;
+  console.log(`[key-left] viewX ${before.x.toFixed(2)} → ${afterLeft.x.toFixed(2)}  shift=${leftShift.toFixed(2)}  (expect > 0 = content left)`);
+  expect(leftShift).toBeGreaterThan(0); // content left → viewX increases
+
+  await page.keyboard.press("ArrowUp");
+  await page.waitForTimeout(100);
+  const afterUp = await page.evaluate(() => (window as any).__getViewCenter());
+  const upShift = afterUp.y - afterLeft.y;
+  console.log(`[key-up] viewY ${afterLeft.y.toFixed(2)} → ${afterUp.y.toFixed(2)}  shift=${upShift.toFixed(2)}  (expect > 0 = content up)`);
+  expect(upShift).toBeGreaterThan(0); // content up → viewY increases
 });
