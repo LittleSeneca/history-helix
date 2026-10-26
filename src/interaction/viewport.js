@@ -97,9 +97,18 @@ export function getViewCenter() {
 // ── Pan ─────────────────────────────────────────────────────
 
 /**
- * Pan the view by a screen-space delta (in pixels).
- * @param {number} dx - screen pixel delta x
- * @param {number} dy - screen pixel delta y
+ * Move the CONTENT by (dx, dy) screen pixels.
+ * This is the single source of truth for pan direction —
+ * every call site MUST obey the same sign convention.
+ *
+ * Convention: dx > 0 → content moves RIGHT; dy > 0 → content moves DOWN.
+ * Content follows the pointer: drag right → call pan(+dx, 0).
+ *
+ * Implementation: adjusts the view-center scene coordinate
+ * so that content shifts by Δpixels / zoom in scene space.
+ *
+ * @param {number} dx - screen pixels to shift content horizontally (right positive)
+ * @param {number} dy - screen pixels to shift content vertically (down positive)
  */
 export function pan(dx, dy) {
   _viewX -= dx / _zoom;
@@ -231,16 +240,16 @@ export function handleKeyboard(e) {
   const STEP = 50; // scene units per keypress
   switch (e.key) {
     case "ArrowLeft":
-      pan(STEP, 0);
-      return true;
-    case "ArrowRight":
       pan(-STEP, 0);
       return true;
+    case "ArrowRight":
+      pan(STEP, 0);
+      return true;
     case "ArrowUp":
-      pan(0, STEP);
+      pan(0, -STEP);
       return true;
     case "ArrowDown":
-      pan(0, -STEP);
+      pan(0, STEP);
       return true;
     case "+":
     case "=":
@@ -329,7 +338,9 @@ export function wireCanvas(canvas) {
         const newCy = (pts[0].clientY + pts[1].clientY) / 2;
 
         if (_pinchDist > 0 && newDist > 0) {
-          // Pan to follow midpoint movement (grab-and-drag)
+          // Pan to follow midpoint movement — content follows the fingers.
+          // Under the convention pan(dx,dy) = move content by (dx,dy):
+          // midpoint moves right → ds>0 → content right. Correct.
           pan(newCx - _pinchCx, newCy - _pinchCy);
 
           // Zoom at the new midpoint
@@ -347,7 +358,7 @@ export function wireCanvas(canvas) {
         const dy = e.clientY - _lastY;
         _lastX = e.clientX;
         _lastY = e.clientY;
-        pan(-dx, -dy);
+        pan(dx, dy);
       }
     } else if (_dragging) {
       // Mouse pan
@@ -355,7 +366,7 @@ export function wireCanvas(canvas) {
       const dy = e.clientY - _lastY;
       _lastX = e.clientX;
       _lastY = e.clientY;
-      pan(-dx, -dy);
+      pan(dx, dy);
     }
   });
 
