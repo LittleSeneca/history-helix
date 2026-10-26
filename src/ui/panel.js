@@ -254,12 +254,12 @@ function _createLegend(container) {
   const strandPart = document.createElement("div");
   strandPart.innerHTML = "<span style='opacity:0.6'>strands:</span> ";
 
-  // Mini swatch of 8 pastel samples representing the full 64-color palette
+  // Mini swatch of 16 pastel samples representing the full 64-color palette (C-4: updated chroma)
   const SWATCH_COLORS = [
-    "#d8c4c4", "#ded4ce", "#e4e2c8", "#d5d8c4",
-    "#d8e4d7", "#c4d8c9", "#d7e4e4", "#c4d0d8",
-    "#ced2de", "#d8d7e4", "#cec4d8", "#e4d7e1",
-    "#d8c4cc", "#e2babe", "#e9d6d2", "#e2c5ba",
+    "#edb6b6", "#eddab6", "#eddfb6", "#d6edb6",
+    "#d1edb6", "#b6edbe", "#b6edc3", "#b6ede7",
+    "#b6eded", "#b6c8ed", "#b6c3ed", "#ccb6ed",
+    "#d1b6ed", "#edb6e4", "#edb6df", "#edb6bb",
   ];
 
   for (const color of SWATCH_COLORS) {
